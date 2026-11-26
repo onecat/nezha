@@ -131,9 +131,7 @@
                 return nodes
             },
             initTooltip() {
-                $(document).ready(function(){
-                    $('[data-toggle="tooltip"]').tooltip();
-                });
+                // Native title tooltips avoid loading the legacy HTML tooltip plugin.
             },
             getPercent(up, down) {
                 if (!up) {

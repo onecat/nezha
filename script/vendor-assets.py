@@ -95,6 +95,16 @@ def localize(match):
     else:
         value = re.sub(r"^https://[^/]+/cdn/expire-[^/]+/", "", url)
         name, version, relative = value.split("/", 2)
+    # Use the standalone precompiled distribution, not the build toolchain.
+    if name == "semantic-ui":
+        name, version = "semantic-ui-css", "2.5.0"
+        relative = relative.removeprefix("dist/")
+    if name == "jquery":
+        version = "3.7.1"
+    if name == "vue":
+        version = "2.7.16"
+    if name == "echarts":
+        version = "6.1.0"
     # Normalize CDN aliases to their actual npm paths before copying.
     if name == "bootstrap-icons" and version == "1.8.1":
         version = "1.11.3"
@@ -103,7 +113,16 @@ def localize(match):
     if name == "limonte-sweetalert2":
         relative = "dist/" + relative if not relative.startswith("dist/") else relative
     base, dest = get_package(name, version)
-    copy_asset(base, dest, relative)
+    if name == "bootstrap" and relative == "dist/js/bootstrap.min.js":
+        # Keep the Bootstrap 3 layout and only the plugins actually used by
+        # ServerStatus. Do not ship button, tooltip, popover or carousel.
+        relative = "dist/js/bootstrap-server-status.js"
+        target = dest / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        plugins = ("transition", "collapse", "dropdown", "modal")
+        target.write_text("\\n;\\n".join((base / "js" / (plugin + ".js")).read_text(encoding="utf-8") for plugin in plugins), encoding="utf-8")
+    else:
+        copy_asset(base, dest, relative)
     return "/static/vendor/" + dest.name + "/" + relative
 
 CDN = re.compile(r"""https://(?:unpkg\.com/|lf[0-9]+-cdn-tos\.bytecdntp\.com/cdn/expire-[^/]+/)[^'"\s<>{}()]+""")

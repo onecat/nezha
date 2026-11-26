@@ -49,5 +49,13 @@ with tempfile.TemporaryDirectory() as tmp:
                         "exitCode": audit.returncode})
         failed |= bool(audit.returncode or "error" in result)
         print("Audit group", i, "exit", audit.returncode, flush=True)
+        for name, finding in sorted(result.get("vulnerabilities", {}).items()):
+            if name in dependencies:
+                print("Direct finding", name, dependencies[name], finding.get("severity"), flush=True)
+                for via in finding.get("via", []):
+                    if isinstance(via, dict):
+                        print("  ", via.get("url"), via.get("title"), flush=True)
+        if "error" in result:
+            print("Audit error:", result["error"], flush=True)
 (root / "frontend-audit.json").write_text(json.dumps(reports, indent=2) + "\n")
 raise SystemExit(1 if failed else 0)

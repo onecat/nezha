@@ -28,7 +28,7 @@
             <td class="node-cell center">@#service.name#@</td>
             <td class="node-cell center service-details-td">
                 <template v-for="(item,index) in service.dayDetail">
-                    <div data-toggle="tooltip" data-placement="top" class="service-day-status-icon" :class="item.className"
+                    <div class="service-day-status-icon" :class="item.className"
                          :title="item.text">
                     </div>
                 </template>
