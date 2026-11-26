@@ -189,26 +189,17 @@ func (s *NezhaHandler) ReportSystemInfo(c context.Context, r *pb.Host) (*pb.Rece
 }
 
 func (s *NezhaHandler) IOStream(stream pb.NezhaService_IOStreamServer) error {
-	if _, err := s.Auth.Check(stream.Context()); err != nil {
-		return err
-	}
+	clientID, err := s.Auth.Check(stream.Context())
+	if err != nil { return err }
 	id, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-	if id == nil || len(id.Data) < 4 || (id.Data[0] != 0xff && id.Data[1] != 0x05 && id.Data[2] != 0xff && id.Data[3] == 0x05) {
+	if err != nil { return err }
+	if id == nil || len(id.Data) != 40 || id.Data[0] != 0xff || id.Data[1] != 0x05 || id.Data[2] != 0xff || id.Data[3] != 0x05 {
 		return fmt.Errorf("invalid stream id")
 	}
-
 	streamId := string(id.Data[4:])
-
-	if _, err := s.GetStream(streamId); err != nil {
-		return err
-	}
 	iw := grpcx.NewIOStreamWrapper(stream)
-	if err := s.AgentConnected(streamId, iw); err != nil {
-		return err
-	}
+	if err := s.AgentConnected(streamId, clientID, iw); err != nil { return err }
+	defer s.CloseStream(streamId)
 	iw.Wait()
 	return nil
 }

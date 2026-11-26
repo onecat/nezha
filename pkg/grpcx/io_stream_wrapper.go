@@ -61,5 +61,8 @@ func (iw *IOStreamWrapper) Close() error {
 }
 
 func (iw *IOStreamWrapper) Wait() {
-	<-iw.closeCh
+	select {
+	case <-iw.closeCh:
+	case <-iw.Context().Done():
+	}
 }

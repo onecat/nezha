@@ -4,154 +4,136 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
+type StreamKind uint8
+
+const (
+	StreamTerminal StreamKind = iota + 1
+	StreamFile
+	StreamNAT
+	maxStreams = 256
+	pendingStreamAge = 30 * time.Second
+)
+
 type ioStreamContext struct {
-	userIo           io.ReadWriteCloser
-	agentIo          io.ReadWriteCloser
-	userIoConnectCh  chan struct{}
-	agentIoConnectCh chan struct{}
+	ownerID, agentID uint64
+	kind StreamKind
+	userIo, agentIo io.ReadWriteCloser
+	userReady, agentReady, done chan struct{}
+	timer *time.Timer
+	started bool
 }
 
-type bp struct {
-	buf []byte
-}
+var bufPool = sync.Pool{New: func() any { b := make([]byte, 64*1024); return &b }}
+var errStream = errors.New("stream unavailable")
 
-var bufPool = sync.Pool{
-	New: func() any {
-		return &bp{
-			buf: make([]byte, 1024*1024),
-		}
-	},
-}
-
-func (s *NezhaHandler) CreateStream(streamId string) {
+func (s *NezhaHandler) CreateStream(id string, ownerID, agentID uint64, kind StreamKind) error {
+	if id == "" || agentID == 0 || (kind != StreamTerminal && kind != StreamFile && kind != StreamNAT) ||
+		(kind == StreamNAT && ownerID != 0) || (kind != StreamNAT && ownerID == 0) {
+		return errStream
+	}
 	s.ioStreamMutex.Lock()
 	defer s.ioStreamMutex.Unlock()
-
-	s.ioStreams[streamId] = &ioStreamContext{
-		userIoConnectCh:  make(chan struct{}),
-		agentIoConnectCh: make(chan struct{}),
+	if len(s.ioStreams) >= maxStreams || s.ioStreams[id] != nil {
+		return errStream
 	}
+	ctx := &ioStreamContext{ownerID: ownerID, agentID: agentID, kind: kind,
+		userReady: make(chan struct{}), agentReady: make(chan struct{}), done: make(chan struct{})}
+	s.ioStreams[id] = ctx
+	ctx.timer = time.AfterFunc(pendingStreamAge, func() { s.closeStream(id, ctx, true) })
+	return nil
 }
 
-func (s *NezhaHandler) GetStream(streamId string) (*ioStreamContext, error) {
+func (s *NezhaHandler) CanConnectUser(id string, ownerID uint64, kind StreamKind) bool {
 	s.ioStreamMutex.RLock()
 	defer s.ioStreamMutex.RUnlock()
-
-	if ctx, ok := s.ioStreams[streamId]; ok {
-		return ctx, nil
-	}
-
-	return nil, errors.New("stream not found")
+	ctx := s.ioStreams[id]
+	return ctx != nil && ctx.ownerID == ownerID && ctx.kind == kind && ctx.userIo == nil
 }
 
-func (s *NezhaHandler) CloseStream(streamId string) error {
+func (s *NezhaHandler) closeStream(id string, expected *ioStreamContext, pendingOnly bool) {
+	s.ioStreamMutex.Lock()
+	ctx := s.ioStreams[id]
+	if ctx == nil || (expected != nil && ctx != expected) || (pendingOnly && ctx.started) {
+		s.ioStreamMutex.Unlock()
+		return
+	}
+	delete(s.ioStreams, id)
+	ctx.timer.Stop()
+	close(ctx.done)
+	user, agent := ctx.userIo, ctx.agentIo
+	s.ioStreamMutex.Unlock()
+	// Never close a connection while holding the global stream lock.
+	if user != nil { _ = user.Close() }
+	if agent != nil { _ = agent.Close() }
+}
+
+func (s *NezhaHandler) CloseStream(id string) error {
+	s.closeStream(id, nil, false)
+	return nil
+}
+
+func (s *NezhaHandler) UserConnected(id string, ownerID uint64, kind StreamKind, conn io.ReadWriteCloser) error {
 	s.ioStreamMutex.Lock()
 	defer s.ioStreamMutex.Unlock()
-
-	if ctx, ok := s.ioStreams[streamId]; ok {
-		if ctx.userIo != nil {
-			ctx.userIo.Close()
-		}
-		if ctx.agentIo != nil {
-			ctx.agentIo.Close()
-		}
-		delete(s.ioStreams, streamId)
+	ctx := s.ioStreams[id]
+	if ctx == nil || ctx.ownerID != ownerID || ctx.kind != kind || ctx.userIo != nil || conn == nil {
+		return errStream
 	}
-
+	ctx.userIo = conn
+	close(ctx.userReady)
 	return nil
 }
 
-func (s *NezhaHandler) UserConnected(streamId string, userIo io.ReadWriteCloser) error {
-	stream, err := s.GetStream(streamId)
-	if err != nil {
-		return err
+func (s *NezhaHandler) AgentConnected(id string, agentID uint64, conn io.ReadWriteCloser) error {
+	s.ioStreamMutex.Lock()
+	defer s.ioStreamMutex.Unlock()
+	ctx := s.ioStreams[id]
+	if ctx == nil || ctx.agentID != agentID || ctx.agentIo != nil || conn == nil {
+		return errStream
 	}
-
-	stream.userIo = userIo
-	close(stream.userIoConnectCh)
-
+	ctx.agentIo = conn
+	close(ctx.agentReady)
 	return nil
 }
 
-func (s *NezhaHandler) AgentConnected(streamId string, agentIo io.ReadWriteCloser) error {
-	stream, err := s.GetStream(streamId)
-	if err != nil {
-		return err
-	}
-
-	stream.agentIo = agentIo
-	close(stream.agentIoConnectCh)
-
-	return nil
-}
-
-func (s *NezhaHandler) StartStream(streamId string, timeout time.Duration) error {
-	stream, err := s.GetStream(streamId)
-	if err != nil {
-		return err
-	}
-
-	timeoutTimer := time.NewTimer(timeout)
-
-LOOP:
-	for {
+func (s *NezhaHandler) StartStream(id string, timeout time.Duration) error {
+	s.ioStreamMutex.RLock()
+	ctx := s.ioStreams[id]
+	s.ioStreamMutex.RUnlock()
+	if ctx == nil { return errStream }
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for _, ready := range []chan struct{}{ctx.userReady, ctx.agentReady} {
 		select {
-		case <-stream.userIoConnectCh:
-			if stream.agentIo != nil {
-				timeoutTimer.Stop()
-				break LOOP
-			}
-		case <-stream.agentIoConnectCh:
-			if stream.userIo != nil {
-				timeoutTimer.Stop()
-				break LOOP
-			}
-		case <-time.After(timeout):
-			break LOOP
+		case <-ready:
+		case <-ctx.done: return errStream
+		case <-timer.C: return errors.New("stream connection timeout")
 		}
-		time.Sleep(time.Millisecond * 500)
 	}
-
-	if stream.userIo == nil && stream.agentIo == nil {
-		return errors.New("timeout: no connection established")
+	s.ioStreamMutex.Lock()
+	if s.ioStreams[id] != ctx || ctx.started {
+		s.ioStreamMutex.Unlock()
+		return errStream
 	}
-	if stream.userIo == nil {
-		return errors.New("timeout: user connection not established")
+	ctx.started = true
+	ctx.timer.Stop()
+	user, agent := ctx.userIo, ctx.agentIo
+	s.ioStreamMutex.Unlock()
+	defer s.closeStream(id, ctx, false)
+	result := make(chan error, 2)
+	copyStream := func(dst io.Writer, src io.Reader) {
+		buf := bufPool.Get().(*[]byte)
+		defer bufPool.Put(buf)
+		_, err := io.CopyBuffer(dst, src, *buf)
+		result <- err
 	}
-	if stream.agentIo == nil {
-		return errors.New("timeout: agent connection not established")
+	go copyStream(user, agent)
+	go copyStream(agent, user)
+	select {
+	case err := <-result: return err
+	case <-ctx.done: return errStream
 	}
-
-	isDone := new(atomic.Bool)
-	endCh := make(chan struct{})
-
-	go func() {
-		bp := bufPool.Get().(*bp)
-		defer bufPool.Put(bp)
-		_, innerErr := io.CopyBuffer(stream.userIo, stream.agentIo, bp.buf)
-		if innerErr != nil {
-			err = innerErr
-		}
-		if isDone.CompareAndSwap(false, true) {
-			close(endCh)
-		}
-	}()
-	go func() {
-		bp := bufPool.Get().(*bp)
-		defer bufPool.Put(bp)
-		_, innerErr := io.CopyBuffer(stream.agentIo, stream.userIo, bp.buf)
-		if innerErr != nil {
-			err = innerErr
-		}
-		if isDone.CompareAndSwap(false, true) {
-			close(endCh)
-		}
-	}()
-
-	<-endCh
-	return err
 }

@@ -270,7 +270,13 @@ type Data struct {
 	Servers []*model.Server `json:"servers,omitempty"`
 }
 
+var statsWSSlots = make(chan struct{}, 256)
+
 func (cp *commonPage) ws(c *gin.Context) {
+	select {
+	case statsWSSlots <- struct{}{}: defer func() { <-statsWSSlots }()
+	default: c.AbortWithStatus(http.StatusServiceUnavailable); return
+	}
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		mygin.ShowErrorPage(c, mygin.ErrInfo{
@@ -287,9 +293,10 @@ func (cp *commonPage) ws(c *gin.Context) {
 	defer conn.Close()
 	count := 0
 	for {
+		_ = conn.SetWriteDeadline(time.Now().Add(10*time.Second))
 		stat, err := cp.getServerStat(c, false)
 		if err != nil {
-			continue
+			return
 		}
 		if err := conn.WriteMessage(websocket.TextMessage, stat); err != nil {
 			break
@@ -306,50 +313,37 @@ func (cp *commonPage) ws(c *gin.Context) {
 }
 
 func (cp *commonPage) terminal(c *gin.Context) {
-	streamId := c.Param("id")
-	if _, err := rpc.NezhaHandlerSingleton.GetStream(streamId); err != nil {
-		mygin.ShowErrorPage(c, mygin.ErrInfo{
-			Code:  http.StatusForbidden,
-			Title: "无权访问",
-			Msg:   "终端会话不存在",
-			Link:  "/",
-			Btn:   "返回首页",
-		}, true)
-		return
-	}
-	defer rpc.NezhaHandlerSingleton.CloseStream(streamId)
+	cp.connectBrowserStream(c, rpc.StreamTerminal)
+}
 
-	wsConn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		mygin.ShowErrorPage(c, mygin.ErrInfo{
-			Code: http.StatusInternalServerError,
-			Title: singleton.Localizer.MustLocalize(&i18n.LocalizeConfig{
-				MessageID: "NetworkError",
-			}),
-			Msg:  "Websocket协议切换失败",
-			Link: "/",
-			Btn:  "返回首页",
-		}, true)
+func (cp *commonPage) connectBrowserStream(c *gin.Context, kind rpc.StreamKind) {
+	value, ok := c.Get(model.CtxKeyAuthorizedUser)
+	user, valid := value.(*model.User)
+	id := c.Param("id")
+	if !ok || !valid || user.ID == 0 || !rpc.NezhaHandlerSingleton.CanConnectUser(id, user.ID, kind) {
+		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
+	wsConn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil { return }
 	defer wsConn.Close()
 	conn := websocketx.NewConn(wsConn)
-
+	if err := rpc.NezhaHandlerSingleton.UserConnected(id, user.ID, kind, conn); err != nil { return }
+	defer rpc.NezhaHandlerSingleton.CloseStream(id)
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		// PING 保活
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
 		for {
-			if err = conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-				return
+			select {
+			case <-done: return
+			case <-ticker.C:
+				if conn.WriteMessage(websocket.PingMessage, nil) != nil { _ = conn.Close(); return }
 			}
-			time.Sleep(time.Second * 10)
 		}
 	}()
-
-	if err = rpc.NezhaHandlerSingleton.UserConnected(streamId, conn); err != nil {
-		return
-	}
-
-	rpc.NezhaHandlerSingleton.StartStream(streamId, time.Second*10)
+	_ = rpc.NezhaHandlerSingleton.StartStream(id, 10*time.Second)
 }
 
 type createTerminalRequest struct {
@@ -395,8 +389,6 @@ func (cp *commonPage) createTerminal(c *gin.Context) {
 		return
 	}
 
-	rpc.NezhaHandlerSingleton.CreateStream(streamId)
-
 	singleton.ServerLock.RLock()
 	server := singleton.ServerList[createTerminalReq.ID]
 	singleton.ServerLock.RUnlock()
@@ -411,6 +403,11 @@ func (cp *commonPage) createTerminal(c *gin.Context) {
 		return
 	}
 
+	user := c.MustGet(model.CtxKeyAuthorizedUser).(*model.User)
+	if err := rpc.NezhaHandlerSingleton.CreateStream(streamId, user.ID, server.ID, rpc.StreamTerminal); err != nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	terminalData, _ := utils.Json.Marshal(&model.TerminalTask{
 		StreamID: streamId,
 	})
@@ -418,6 +415,7 @@ func (cp *commonPage) createTerminal(c *gin.Context) {
 		Type: model.TaskTypeTerminalGRPC,
 		Data: string(terminalData),
 	}); err != nil {
+		_ = rpc.NezhaHandlerSingleton.CloseStream(streamId)
 		mygin.ShowErrorPage(c, mygin.ErrInfo{
 			Code:  http.StatusForbidden,
 			Title: "请求失败",
@@ -436,50 +434,7 @@ func (cp *commonPage) createTerminal(c *gin.Context) {
 }
 
 func (cp *commonPage) fm(c *gin.Context) {
-	streamId := c.Param("id")
-	if _, err := rpc.NezhaHandlerSingleton.GetStream(streamId); err != nil {
-		mygin.ShowErrorPage(c, mygin.ErrInfo{
-			Code:  http.StatusForbidden,
-			Title: "无权访问",
-			Msg:   "FM会话不存在",
-			Link:  "/",
-			Btn:   "返回首页",
-		}, true)
-		return
-	}
-	defer rpc.NezhaHandlerSingleton.CloseStream(streamId)
-
-	wsConn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		mygin.ShowErrorPage(c, mygin.ErrInfo{
-			Code: http.StatusInternalServerError,
-			Title: singleton.Localizer.MustLocalize(&i18n.LocalizeConfig{
-				MessageID: "NetworkError",
-			}),
-			Msg:  "Websocket协议切换失败",
-			Link: "/",
-			Btn:  "返回首页",
-		}, true)
-		return
-	}
-	defer wsConn.Close()
-	conn := websocketx.NewConn(wsConn)
-
-	go func() {
-		// PING 保活
-		for {
-			if err = conn.WriteMessage(websocket.PingMessage, []byte{}); err != nil {
-				return
-			}
-			time.Sleep(time.Second * 10)
-		}
-	}()
-
-	if err = rpc.NezhaHandlerSingleton.UserConnected(streamId, conn); err != nil {
-		return
-	}
-
-	rpc.NezhaHandlerSingleton.StartStream(streamId, time.Second*10)
+	cp.connectBrowserStream(c, rpc.StreamFile)
 }
 
 func (cp *commonPage) createFM(c *gin.Context) {
@@ -509,9 +464,7 @@ func (cp *commonPage) createFM(c *gin.Context) {
 		return
 	}
 
-	rpc.NezhaHandlerSingleton.CreateStream(streamId)
-
-	serverId, err := strconv.Atoi(IdString)
+	serverId, err := strconv.ParseUint(IdString, 10, 64)
 	if err != nil {
 		mygin.ShowErrorPage(c, mygin.ErrInfo{
 			Code:  http.StatusForbidden,
@@ -526,7 +479,7 @@ func (cp *commonPage) createFM(c *gin.Context) {
 	singleton.ServerLock.RLock()
 	server := singleton.ServerList[uint64(serverId)]
 	singleton.ServerLock.RUnlock()
-	if server == nil {
+	if server == nil || server.TaskStream == nil {
 		mygin.ShowErrorPage(c, mygin.ErrInfo{
 			Code:  http.StatusForbidden,
 			Title: "请求失败",
@@ -537,6 +490,11 @@ func (cp *commonPage) createFM(c *gin.Context) {
 		return
 	}
 
+	user := c.MustGet(model.CtxKeyAuthorizedUser).(*model.User)
+	if err := rpc.NezhaHandlerSingleton.CreateStream(streamId, user.ID, server.ID, rpc.StreamFile); err != nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	fmData, _ := utils.Json.Marshal(&model.TaskFM{
 		StreamID: streamId,
 	})
@@ -544,6 +502,7 @@ func (cp *commonPage) createFM(c *gin.Context) {
 		Type: model.TaskTypeFM,
 		Data: string(fmData),
 	}); err != nil {
+		_ = rpc.NezhaHandlerSingleton.CloseStream(streamId)
 		mygin.ShowErrorPage(c, mygin.ErrInfo{
 			Code:  http.StatusForbidden,
 			Title: "请求失败",

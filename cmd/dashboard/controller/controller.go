@@ -305,7 +305,10 @@ func natGateway(c *gin.Context) {
 		return
 	}
 
-	rpc.NezhaHandlerSingleton.CreateStream(streamId)
+	if err := rpc.NezhaHandlerSingleton.CreateStream(streamId, 0, server.ID, rpc.StreamNAT); err != nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	defer rpc.NezhaHandlerSingleton.CloseStream(streamId)
 
 	taskData, err := utils.Json.Marshal(model.TaskNAT{
@@ -334,7 +337,8 @@ func natGateway(c *gin.Context) {
 		return
 	}
 
-	if err := rpc.NezhaHandlerSingleton.UserConnected(streamId, w); err != nil {
+	if err := rpc.NezhaHandlerSingleton.UserConnected(streamId, 0, rpc.StreamNAT, w); err != nil {
+		_ = w.Close()
 		c.Writer.WriteString(fmt.Sprintf("user connected error: %v", err))
 		c.Abort()
 		return

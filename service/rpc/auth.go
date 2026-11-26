@@ -29,8 +29,11 @@ func (a *authHandler) Check(ctx context.Context) (uint64, error) {
 	}
 
 	var clientSecret string
-	if value, ok := md["client_secret"]; ok {
+	if value := md["client_secret"]; len(value) == 1 {
 		clientSecret = value[0]
+	}
+	if clientSecret == "" {
+		return 0, status.Errorf(codes.Unauthenticated, "客户端认证失败")
 	}
 
 	singleton.ServerLock.RLock()
