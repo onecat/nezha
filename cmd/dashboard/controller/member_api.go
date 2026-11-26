@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"net/http"
@@ -18,7 +17,6 @@ import (
 	"github.com/naiba/nezha/model"
 	"github.com/naiba/nezha/pkg/mygin"
 	"github.com/naiba/nezha/pkg/utils"
-	"github.com/naiba/nezha/proto"
 	"github.com/naiba/nezha/resource"
 	"github.com/naiba/nezha/service/singleton"
 )
@@ -44,7 +42,6 @@ func (ma *memberAPI) serve() {
 	mr.POST("/monitor", ma.addOrEditMonitor)
 	mr.POST("/cron", ma.addOrEditCron)
 	mr.GET("/cron/:id/manual", ma.manualTrigger)
-	mr.POST("/force-update", ma.forceUpdate)
 	mr.POST("/batch-update-server-group", ma.batchUpdateServerGroup)
 	mr.POST("/batch-delete-server", ma.batchDeleteServer)
 	mr.POST("/notification", ma.addOrEditNotification)
@@ -672,41 +669,6 @@ func (ma *memberAPI) batchUpdateServerGroup(c *gin.Context) {
 	})
 }
 
-func (ma *memberAPI) forceUpdate(c *gin.Context) {
-	var forceUpdateServers []uint64
-	if err := c.ShouldBindJSON(&forceUpdateServers); err != nil {
-		c.JSON(http.StatusOK, model.Response{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		})
-		return
-	}
-
-	var executeResult bytes.Buffer
-
-	for i := 0; i < len(forceUpdateServers); i++ {
-		singleton.ServerLock.RLock()
-		server := singleton.ServerList[forceUpdateServers[i]]
-		singleton.ServerLock.RUnlock()
-		if server != nil && server.TaskStream != nil {
-			if err := server.TaskStream.Send(&proto.Task{
-				Type: model.TaskTypeUpgrade,
-			}); err != nil {
-				executeResult.WriteString(fmt.Sprintf("%d 下发指令失败 %+v<br/>", forceUpdateServers[i], err))
-			} else {
-				executeResult.WriteString(fmt.Sprintf("%d 下发指令成功<br/>", forceUpdateServers[i]))
-			}
-		} else {
-			executeResult.WriteString(fmt.Sprintf("%d 离线<br/>", forceUpdateServers[i]))
-		}
-	}
-
-	c.JSON(http.StatusOK, model.Response{
-		Code:    http.StatusOK,
-		Message: executeResult.String(),
-	})
-}
-
 type notificationForm struct {
 	ID            uint64
 	Name          string
@@ -990,23 +952,18 @@ func (ma *memberAPI) logout(c *gin.Context) {
 		})
 		return
 	}
-	singleton.DB.Model(admin).UpdateColumns(model.User{
-		Token:        "",
-		TokenExpired: time.Now(),
-	})
+	if err := singleton.DB.Model(admin).UpdateColumns(map[string]interface{}{"token": "", "token_expired": time.Now()}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, model.Response{Code: http.StatusInternalServerError, Message: "注销失败"})
+		return
+	}
 	c.JSON(http.StatusOK, model.Response{
 		Code: http.StatusOK,
 	})
 
-	if oidcLogoutUrl := singleton.Conf.Oauth2.OidcLogoutURL; oidcLogoutUrl != "" {
-		// 重定向到 OIDC 退出登录地址。不知道为什么，这里的重定向不生效
-		c.Redirect(http.StatusOK, oidcLogoutUrl)
-	}
 }
 
 type settingForm struct {
 	Title                   string
-	Admin                   string
 	Language                string
 	Theme                   string
 	DashboardTheme          string
@@ -1081,7 +1038,6 @@ func (ma *memberAPI) updateSetting(c *gin.Context) {
 	singleton.Conf.Site.CustomCodeDashboard = sf.CustomCodeDashboard
 	singleton.Conf.DNSServers = sf.CustomNameservers
 	singleton.Conf.Site.ViewPassword = sf.ViewPassword
-	singleton.Conf.Oauth2.Admin = sf.Admin
 	// 保证NotificationTag不为空
 	if singleton.Conf.IPChangeNotificationTag == "" {
 		singleton.Conf.IPChangeNotificationTag = "default"

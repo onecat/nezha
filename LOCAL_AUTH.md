@@ -1,43 +1,17 @@
-# Nezha V0.20.13 — local administrator login
+# Nezha internal Dashboard (V0 protocol)
 
-This branch derives from the exact upstream tag `v0.20.13` and retains the old V0 Agent protocol.
-Only the dashboard authentication/login page is modified.
+Based on upstream V0.20.13. Local authentication is mandatory; OAuth settings are ignored.
+Configure an existing V0 SQLite deployment with:
 
-## Enable local login
+    localauth:
+      username: admin
+      passwordhash: '$2y$12$REPLACE_WITH_BCRYPT_HASH'
 
-Existing V0 data/config.yaml:
-```yaml
-oauth2:
-  type: local
-localauth:
-  username: admin
-  passwordhash: '$2y$12$REPLACE_WITH_BCRYPT_HASH'
-```
+Use htpasswd -nBC 12 admin, and copy only the hash after the colon. Restart the Dashboard after changes.
+Existing OAuth sessions are rejected. Existing API tokens remain supported.
+The Agent command shown in the UI assumes that a compatible V0.20.5 executable has already been installed from your own trusted internal distribution; no official installer is invoked.
+Agent V0.20.5 itself is unchanged, including public IP discovery.
 
-Generate bcrypt password hash on Debian: `apt install apache2-utils && htpasswd -nBC 12 admin`.
-Copy only the string after the colon. Do not put a plaintext password into config.
-Existing SQLite DB is reused, and original OAuth login remains available by
-switching `oauth2.type` back to `github`, `gitee`, `oidc`, etc., with original credentials.
+Run python3 script/vendor-assets.py before compiling; this obtains pinned frontend dependencies from npm at build time, rewrites bundled templates, and embeds assets in the binary. Runtime does not need a CDN for bundled pages. Custom templates and configured monitors, notifications and DDNS remain administrator-controlled.
 
-Use Nginx reverse proxy with `X-Forwarded-Proto https` and trusted `nz-realip`.
-The local login form uses CSRF protection, bcrypt, a 15-minute 5-failure IP limit,
-HttpOnly cookies, and clears local tokens on dashboard startup.
-Changing the password currently requires changing the bcrypt hash in YAML and restarting Dashboard.
-No web UI for password rotation is included in this initial version.
-
-## Build
-
-Push to branch `v0.20.13-local-auth`; the dedicated GitHub Actions
-workflow tests and builds a Linux AMD64 binary, then publishes it as a GitHub Release.
-Build numbering starts at v0.30.00 (workflow run 3), then increments once per new workflow run: v0.30.01, v0.30.02, and so on. Failed runs consume a number but do not publish a release. Reruns keep the same version; published releases are not overwritten.
-Download the latest binary and checksum from:
-
-- https://github.com/onecat/nezha/releases/latest/download/nezha-app
-- https://github.com/onecat/nezha/releases/latest/download/SHA256SUMS
-
-This workflow does not build Agent or Docker images.
-
-Local build: `go test ./model ./pkg/mygin ./cmd/dashboard/controller && go build -o dashboard ./cmd/dashboard`.
-
-Warning: V0 is EOL; protect the dashboard and terminal routes through HTTPS
-and strict access controls. Build success alone is not a production security audit.
+The workflow publishes Linux AMD64 nezha-app and SHA256SUMS only after tests and compilation.

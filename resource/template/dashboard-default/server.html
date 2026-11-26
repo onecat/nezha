@@ -14,9 +14,6 @@
                 <button class="ui right labeled nezha-primary-btn icon button" onclick="addOrEditServer()"><i
                         class="add icon"></i> {{tr "AddServer"}}
                 </button>
-                <button class="ui right labeled nezha-primary-btn icon button" onclick="forceUpdate()"><i
-                        class="arrow alternate circle up outline icon"></i> {{tr "ForceUpdate"}}
-                </button>
             </div>
         </div>
         <table class="ui basic table">
@@ -31,7 +28,7 @@
                     <th>{{tr "EnableDDNS"}}</th>
                     <th>{{tr "HideForGuest"}}</th>
                     <th>{{tr "Secret"}}</th>
-                    <th>{{tr "OneKeyInstall"}}</th>
+                    <th>Agent</th>
                     <th>{{tr "Note"}}</th>
                     <th>{{tr "PublicNote"}}</th>
                     <th>{{tr "Administration"}}</th>
@@ -54,21 +51,9 @@
                         </button>
                     </td>
                     <td>
-                        <button class="ui icon green mini button"
-                            data-clipboard-text="{{if $.Conf.GRPCHost}}{{if eq $.Conf.Language "zh-CN"}}curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install.sh{{else}}curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/install_en.sh{{end}} -o nezha.sh && chmod +x nezha.sh && ./nezha.sh install_agent {{$.Conf.GRPCHost}} {{if $.Conf.ProxyGRPCPort}}{{$.Conf.ProxyGRPCPort}}{{else}}{{$.Conf.GRPCPort}}{{end}} {{$server.Secret}}{{if $.Conf.TLS}} --tls{{end}}{{else}}{{tr "NoDomainAlert"}}{{end}}"
-                            data-tooltip="{{tr "ClickToCopy"}}">
-                            <i class="linux icon"></i>
-                        </button>
-                        <button class="ui icon green mini button"
-                            data-clipboard-text="{{if $.Conf.GRPCHost}}[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Ssl3 -bor [Net.SecurityProtocolType]::Tls -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls12;set-ExecutionPolicy RemoteSigned;Invoke-WebRequest https://raw.githubusercontent.com/nezhahq/scripts/main/extras/install.ps1 -OutFile C:\install.ps1;powershell.exe C:\install.ps1 {{$.Conf.GRPCHost}}:{{if $.Conf.ProxyGRPCPort}}{{$.Conf.ProxyGRPCPort}}{{else}}{{$.Conf.GRPCPort}}{{end}} {{$server.Secret}}{{if $.Conf.TLS}} --tls{{end}}{{else}}{{tr "NoDomainAlert"}}{{end}}"
-                            data-tooltip="{{tr "ClickToCopy"}}">
-                            <i class="windows icon"></i>
-                        </button>
-                        <button class="ui icon green mini button"
-                            data-clipboard-text="{{if $.Conf.GRPCHost}}curl -L https://raw.githubusercontent.com/nezhahq/scripts/main/extras/install.command -o nezha.command && chmod +x nezha.command && sudo ./nezha.command install_agent {{$.Conf.GRPCHost}} {{if $.Conf.ProxyGRPCPort}}{{$.Conf.ProxyGRPCPort}}{{else}}{{$.Conf.GRPCPort}}{{end}} {{$server.Secret}}{{if $.Conf.TLS}} --tls{{end}}{{else}}{{tr "NoDomainAlert"}}{{end}}"
-                            data-tooltip="{{tr "ClickToCopy"}}">
-                            <i class="apple icon"></i>
-                        </button>
+                        {{if $.Conf.GRPCHost}}
+                        <button class="ui icon green mini button" data-clipboard-text="./nezha-agent -s {{$.Conf.GRPCHost}}:{{if $.Conf.ProxyGRPCPort}}{{$.Conf.ProxyGRPCPort}}{{else}}{{$.Conf.GRPCPort}}{{end}} -p {{$server.Secret}}{{if $.Conf.TLS}} --tls{{end}} --disable-auto-update --disable-force-update" data-tooltip="{{tr "ClickToCopy"}}"><i class="terminal icon"></i></button>
+                        {{else}}{{tr "NoDomainAlert"}}{{end}}
                     </td>
                     <td>
                         {{if $server.Note}}
@@ -110,52 +95,6 @@
         checkBoxList.forEach(cb => {
             cb.checked = true
         })
-    }
-    function forceUpdate() {
-        const servers = []
-        checkBoxList.forEach(cb => {
-            if (cb.checked) {
-                servers.push(parseInt(cb.value))
-            }
-        })
-        if (servers.length == 0) {
-            $.suiAlert({
-                title: '{{tr "NoServerSelected"}}',
-                description: '',
-                type: 'warning',
-                time: '2',
-                position: 'top-center',
-            });
-            return
-        }
-        $.post('/api/force-update', JSON.stringify(servers))
-            .then((resp) => {
-                if (resp.code == 200) {
-                    $.suiAlert({
-                        title: '{{tr "ExecutionResults"}}',
-                        description: resp.message,
-                        type: 'success',
-                        time: '3',
-                        position: 'top-center',
-                    });
-                } else {
-                    $.suiAlert({
-                        title: '',
-                        description: resp.message,
-                        type: 'error',
-                        time: '3',
-                        position: 'top-center',
-                    });
-                }
-            }).catch(err => {
-                $.suiAlert({
-                    title: '',
-                    description: err,
-                    type: 'error',
-                    time: '3',
-                    position: 'top-center',
-                });
-            })
     }
     function batchEditServerGroup() {
         let groupName = prompt('{{tr "InputServerGroupName"}}')

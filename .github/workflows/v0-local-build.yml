@@ -35,10 +35,12 @@ jobs:
         id: version
         run: |
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          # Run 3 is the first release in the v0.30 series.
-          patch=$((GITHUB_RUN_NUMBER - 3))
+          # Run 4 starts the consolidated internal release at v0.30.03.
+          patch=$((GITHUB_RUN_NUMBER - 1))
           test "$patch" -ge 0
           printf 'tag=v0.30.%02d\n' "$patch" >> "$GITHUB_OUTPUT"
+      - name: Embed offline frontend assets
+        run: python3 script/vendor-assets.py
       - name: Verify local authentication
         env:
           CGO_ENABLED: '1'
@@ -87,5 +89,5 @@ jobs:
         run: |
           gh release create "$RELEASE_TAG" dist/nezha-app dist/SHA256SUMS \
             --target "$SOURCE_SHA" --title "Nezha $RELEASE_TAG" \
-            --notes "Nezha Dashboard V0.20.13 with local administrator authentication. Linux AMD64 binary. Source: $SOURCE_SHA. V0 Agent protocol unchanged. Targeted authentication tests passed. Deployment and Agent integration testing remain recommended." \
+            --notes "Nezha Dashboard V0.20.13 with local authentication and embedded frontend assets. Linux AMD64 binary. Source: $SOURCE_SHA. V0 Agent protocol unchanged. Targeted authentication tests passed. Deployment and Agent integration testing remain recommended." \
             --latest

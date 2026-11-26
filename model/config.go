@@ -55,9 +55,9 @@ const (
 // Config 站点配置
 type Config struct {
 	LocalAuth struct {
-		Username string `koanf:"username"`
-		PasswordHash string `koanf:"passwordhash" json:"-"`
-	} `koanf:"localauth"`
+		Username string `koanf:"username" yaml:"username"`
+		PasswordHash string `koanf:"passwordhash" yaml:"passwordhash" json:"-"`
+	} `koanf:"localauth" yaml:"localauth"`
 	Debug    bool   // debug模式开关
 	Language string // 系统语言，默认 zh-CN
 	Site     struct {
@@ -139,15 +139,16 @@ func (c *Config) Read(path string) error {
 		return err
 	}
 
-	if c.Oauth2.Type == ConfigTypeLocal {
-		if c.LocalAuth.Username == "" {
-			return errors.New("missing localauth.username")
-		}
-		if _, err := bcrypt.Cost([]byte(c.LocalAuth.PasswordHash)); err != nil {
-			return errors.New("invalid localauth.passwordhash: expected bcrypt hash")
-		}
-	} else if c.Oauth2.Type == "" || c.Oauth2.Admin == "" || c.Oauth2.ClientID == "" || c.Oauth2.ClientSecret == "" {
-		return errors.New("missing oauth2 config")
+	// This distribution only supports local authentication.
+	c.Oauth2.Type = ConfigTypeLocal
+	c.Oauth2.ClientID = ""
+	c.Oauth2.ClientSecret = ""
+	c.Oauth2.OidcLogoutURL = ""
+	if strings.TrimSpace(c.LocalAuth.Username) == "" {
+		return errors.New("missing localauth.username")
+	}
+	if _, err := bcrypt.Cost([]byte(c.LocalAuth.PasswordHash)); err != nil {
+		return errors.New("invalid localauth.passwordhash: expected bcrypt hash")
 	}
 
 	if c.Site.Brand == "" {
