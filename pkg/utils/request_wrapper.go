@@ -24,6 +24,7 @@ func NewRequestWrapper(req *http.Request, writer gin.ResponseWriter) (*RequestWr
 	}
 	buf := bytes.NewBuffer(nil)
 	if err = req.Write(buf); err != nil {
+		_ = conn.Close()
 		return nil, err
 	}
 	return &RequestWrapper{

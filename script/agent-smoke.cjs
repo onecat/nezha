@@ -1,4 +1,5 @@
 const { spawn } = require('node:child_process');
+const { runStreamSmoke } = require('./stream-smoke.cjs');
 const { once } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -34,8 +35,8 @@ async function runAgentSmoke(ctx,browser,base) {
   const start=(secret)=>{
     const fd=fs.openSync(path.join(work,'agent.log'),'a');
     const child=spawn(binary,['-s','127.0.0.1:15555','-p',secret,
-      '--disable-auto-update','--disable-force-update','--disable-command-execute',
-      '--disable-nat','--skip-conn','--skip-procs','--report-delay','1'],
+      '--disable-auto-update','--disable-force-update',
+      '--skip-conn','--skip-procs','--report-delay','1'],
       {cwd:work,stdio:['ignore',fd,fd]});
     fs.closeSync(fd);
     child.on('error',()=>{});
@@ -121,6 +122,7 @@ async function runAgentSmoke(ctx,browser,base) {
         }finally{await themeCtx.close();}
       }
     }finally{await guest.close();}
+    await runStreamSmoke(ctx,browser,base,publicID,work,post);
   }finally{
     for(const child of children)await stop(child);
     // CI credentials are disposable; do not publish Agent log or its config.

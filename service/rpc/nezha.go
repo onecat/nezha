@@ -99,23 +99,40 @@ func (s *NezhaHandler) ReportTask(c context.Context, r *pb.TaskResult) (*pb.Rece
 }
 
 func (s *NezhaHandler) RequestTask(h *pb.Host, stream pb.NezhaService_RequestTaskServer) error {
-	var clientID uint64
-	var err error
-	if clientID, err = s.Auth.Check(stream.Context()); err != nil {
-		return err
-	}
+	clientID, err := s.Auth.Check(stream.Context())
+	if err != nil { return err }
 	closeCh := make(chan error)
-	singleton.ServerLock.RLock()
-	singleton.ServerList[clientID].TaskCloseLock.Lock()
-	// 修复不断的请求 task 但是没有 return 导致内存泄漏
-	if singleton.ServerList[clientID].TaskClose != nil {
-		close(singleton.ServerList[clientID].TaskClose)
+	singleton.ServerLock.Lock()
+	singleton.SortedServerLock.Lock()
+	server := singleton.ServerList[clientID]
+	if server == nil {
+		singleton.SortedServerLock.Unlock()
+		singleton.ServerLock.Unlock()
+		return fmt.Errorf("agent no longer exists")
 	}
-	singleton.ServerList[clientID].TaskStream = stream
-	singleton.ServerList[clientID].TaskClose = closeCh
-	singleton.ServerList[clientID].TaskCloseLock.Unlock()
-	singleton.ServerLock.RUnlock()
-	return <-closeCh
+	if server.TaskClose != nil { close(server.TaskClose) }
+	server.TaskStream = stream
+	server.TaskClose = closeCh
+	singleton.SortedServerLock.Unlock()
+	singleton.ServerLock.Unlock()
+
+	// Cancellation must release the RPC even if this Agent never reconnects.
+	// Only the current stream may clear its slot; an old RPC cannot erase a
+	// newer connection. Use the map entry in case server metadata was edited.
+	defer func() {
+		singleton.ServerLock.Lock()
+		singleton.SortedServerLock.Lock()
+		if current := singleton.ServerList[clientID]; current != nil && current.TaskClose == closeCh {
+			current.TaskStream = nil
+			current.TaskClose = nil
+		}
+		singleton.SortedServerLock.Unlock()
+		singleton.ServerLock.Unlock()
+	}()
+	select {
+	case err := <-closeCh: return err
+	case <-stream.Context().Done(): return stream.Context().Err()
+	}
 }
 
 func (s *NezhaHandler) ReportSystemState(c context.Context, r *pb.State) (*pb.Receipt, error) {
