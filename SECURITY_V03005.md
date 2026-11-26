@@ -7,3 +7,5 @@ Next: resolve Go/dependency compatibility, remove unused OAuth SDKs, verify advi
 Dependency remediation: remove unused provider converters and OIDC packages; preserve model.User database fields. The development CI resolves current stable versions of security-sensitive modules, uploads the exact module manifests, and passes them to both verification and vulnerability scanning jobs. Commit resolved manifests and restore read-only dependency verification before release.
 
 Resolved dependency lockfiles from CI run 45786203675 are committed. Go module now declares 1.27.0; toolchain remains 1.27.4. CI no longer resolves moving dependency versions; it verifies the checked-in manifests. Full build and vulnerability rescan remain required.
+
+Browser mutation hardening: require exact Origin or Referer for authenticated non-safe browser requests, preserve explicit API token clients, change cron manual trigger and file creation to POST. Login reserves attempts atomically before bcrypt; at most four concurrent password checks; forwarded HTTPS is trusted only from loopback proxies. Tests added. Pending CI and browser regression.

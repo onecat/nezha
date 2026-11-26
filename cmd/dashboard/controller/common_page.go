@@ -45,8 +45,8 @@ func (cp *commonPage) serve() {
 	cr.GET("/network/:id", cp.network)
 	cr.GET("/network", cp.network)
 	cr.GET("/ws", cp.ws)
-	cr.POST("/terminal", cp.createTerminal)
-	cr.GET("/file", cp.createFM)
+	cr.POST("/terminal", requireSameOriginMutation, cp.createTerminal)
+	cr.POST("/file", requireSameOriginMutation, cp.createFM)
 	cr.GET("/file/:id", cp.fm)
 }
 
@@ -483,7 +483,7 @@ func (cp *commonPage) fm(c *gin.Context) {
 }
 
 func (cp *commonPage) createFM(c *gin.Context) {
-	IdString := c.Query("id")
+	IdString := c.PostForm("id")
 	if _, authorized := c.Get(model.CtxKeyAuthorizedUser); !authorized {
 		mygin.ShowErrorPage(c, mygin.ErrInfo{
 			Code:  http.StatusForbidden,

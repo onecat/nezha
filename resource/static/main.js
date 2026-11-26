@@ -613,7 +613,7 @@ function manualTrigger(btn, cronId) {
   $(btn).toggleClass("loading");
   $.ajax({
     url: "/api/cron/" + cronId + "/manual",
-    type: "GET",
+    type: "POST",
   })
     .done((resp) => {
       $(btn).toggleClass("loading");
@@ -654,7 +654,7 @@ function logout(id) {
         $.suiAlert({
           title: "注销成功",
           type: "success",
-          description: "如需继续访问请使用 GitHub 再次登录",
+          description: "如需继续访问，请重新登录",
           time: "3",
           position: "top-center",
         });

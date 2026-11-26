@@ -39,14 +39,36 @@ func TestLocalRemoteIP(t *testing.T) {
 }
 
 func TestLocalRateLimit(t *testing.T) {
-	ip:="test-local-auth-rate-limit"
-	defer localRecordAttempt(ip,true)
-	localRecordAttempt(ip,true)
-	for i:=0;i<localLoginLimit;i++ {
-		if localTooManyAttempts(ip) { t.Fatalf("premature block at %d",i) }
-		localRecordAttempt(ip,false)
+	ip := "test-local-auth-rate-limit"
+	defer localResetAttempts(ip)
+	localResetAttempts(ip)
+	for i := 0; i < localLoginLimit; i++ {
+		if !localReserveAttempt(ip) { t.Fatalf("premature block at %d", i) }
 	}
-	if !localTooManyAttempts(ip) {t.Fatal("limit not enforced")}
-	localRecordAttempt(ip,true)
-	if localTooManyAttempts(ip) {t.Fatal("successful login does not reset")}
+	if localReserveAttempt(ip) { t.Fatal("limit not enforced") }
+	localResetAttempts(ip)
+	if !localReserveAttempt(ip) { t.Fatal("successful login does not reset") }
+}
+
+func TestLocalRateLimitConcurrent(t *testing.T) {
+	ip := "test-local-auth-concurrent"
+	defer localResetAttempts(ip)
+	results := make(chan bool, 50)
+	for i := 0; i < cap(results); i++ {
+		go func() { results <- localReserveAttempt(ip) }()
+	}
+	accepted := 0
+	for i := 0; i < cap(results); i++ {
+		if <-results { accepted++ }
+	}
+	if accepted != localLoginLimit { t.Fatalf("accepted %d concurrent attempts", accepted) }
+}
+
+func TestLocalSecureCookieProxy(t *testing.T) {
+	ctx := localTestContext()
+	ctx.Request.TLS = nil
+	ctx.Request.RemoteAddr = "203.0.113.10:1234"
+	if localSecureCookie(ctx) { t.Fatal("untrusted forwarded proto accepted") }
+	ctx.Request.RemoteAddr = "127.0.0.1:1234"
+	if !localSecureCookie(ctx) { t.Fatal("trusted loopback proxy rejected") }
 }

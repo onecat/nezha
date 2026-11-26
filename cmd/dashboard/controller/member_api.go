@@ -35,13 +35,14 @@ func (ma *memberAPI) serve() {
 		Redirect:   "/login",
 	}))
 
+	mr.Use(requireSameOriginMutation)
 	mr.GET("/search-server", ma.searchServer)
 	mr.GET("/search-tasks", ma.searchTask)
 	mr.GET("/search-ddns", ma.searchDDNS)
 	mr.POST("/server", ma.addOrEditServer)
 	mr.POST("/monitor", ma.addOrEditMonitor)
 	mr.POST("/cron", ma.addOrEditCron)
-	mr.GET("/cron/:id/manual", ma.manualTrigger)
+	mr.POST("/cron/:id/manual", ma.manualTrigger)
 	mr.POST("/batch-update-server-group", ma.batchUpdateServerGroup)
 	mr.POST("/batch-delete-server", ma.batchDeleteServer)
 	mr.POST("/notification", ma.addOrEditNotification)

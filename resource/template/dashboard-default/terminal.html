@@ -137,10 +137,19 @@
         folderButton.addEventListener('click', () => {
             if (!fileListVisible) {
                 // 显示文件列表
-                const params = new URLSearchParams({
-                    id: "{{.ServerID}}"
-                }).toString();
-                fileListIframe.src = `/file?${params}`;
+                fileListIframe.name = 'nezha-file-list';
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/file';
+                form.target = fileListIframe.name;
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'id';
+                input.value = "{{.ServerID}}";
+                form.appendChild(input);
+                document.body.appendChild(form);
+                form.submit();
+                form.remove();
                 fileListIframe.style.display = 'block';
                 fileListVisible = true;
             } else {

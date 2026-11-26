@@ -26,6 +26,7 @@ func (v *apiV1) serve() {
 		Btn:        "点此登录",
 		Redirect:   "/login",
 	}))
+	r.Use(requireSameOriginMutation)
 	r.GET("/server/list", v.serverList)
 	r.GET("/server/details", v.serverDetails)
 	r.POST("/server/register", v.RegisterServer)

@@ -33,6 +33,7 @@ var localAttempts = struct {
 }{failures: make(map[string]localFailure)}
 
 var localUserMu sync.Mutex
+var localPasswordSlots = make(chan struct{}, 4)
 
 type localFailure struct {
 	Count int
@@ -53,48 +54,46 @@ func localRemoteIP(c *gin.Context) string {
 	return ip
 }
 
-func localTooManyAttempts(key string) bool {
+// Reserve an attempt before performing bcrypt so parallel guesses cannot bypass the limit.
+func localReserveAttempt(key string) bool {
 	localAttempts.Lock()
 	defer localAttempts.Unlock()
-	f, ok := localAttempts.failures[key]
-	if !ok || time.Since(f.Start) >= localLoginWindow {
-		delete(localAttempts.failures, key)
-		return false
-	}
-	return f.Count >= localLoginLimit
-}
-
-func localRecordAttempt(key string, success bool) {
-	localAttempts.Lock()
-	defer localAttempts.Unlock()
-	if success {
-		delete(localAttempts.failures, key)
-		return
-	}
 	now := time.Now()
 	f, ok := localAttempts.failures[key]
 	if !ok || now.Sub(f.Start) >= localLoginWindow {
+		if len(localAttempts.failures) >= 4096 {
+			for addr, old := range localAttempts.failures {
+				if now.Sub(old.Start) >= localLoginWindow {
+					delete(localAttempts.failures, addr)
+				}
+			}
+			if len(localAttempts.failures) >= 4096 {
+				return false
+			}
+		}
 		f = localFailure{Start: now}
 	}
-	f.Count++
-	if len(localAttempts.failures) >= 4096 {
-		for addr, old := range localAttempts.failures {
-			if now.Sub(old.Start) >= localLoginWindow {
-				delete(localAttempts.failures, addr)
-			}
-		}
-		if len(localAttempts.failures) >= 4096 {
-			for addr := range localAttempts.failures {
-				delete(localAttempts.failures, addr)
-				break
-			}
-		}
+	if f.Count >= localLoginLimit {
+		return false
 	}
+	f.Count++
 	localAttempts.failures[key] = f
+	return true
+}
+
+func localResetAttempts(key string) {
+	localAttempts.Lock()
+	defer localAttempts.Unlock()
+	delete(localAttempts.failures, key)
 }
 
 func localSecureCookie(c *gin.Context) bool {
-	return c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
+	if c.Request.TLS != nil {
+		return true
+	}
+	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
+	return err == nil && net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback() &&
+		c.GetHeader("X-Forwarded-Proto") == "https"
 }
 
 func newLocalCSRF(c *gin.Context) (string, error) {
@@ -148,14 +147,20 @@ func (gp *guestPage) localLogin(c *gin.Context) {
 		return
 	}
 	client := localRemoteIP(c)
-	if localTooManyAttempts(client) {
+	select {
+	case localPasswordSlots <- struct{}{}:
+		defer func() { <-localPasswordSlots }()
+	default:
+		c.AbortWithStatus(http.StatusTooManyRequests)
+		return
+	}
+	if !localReserveAttempt(client) {
 		c.AbortWithStatus(http.StatusTooManyRequests)
 		return
 	}
 	validPassword := bcrypt.CompareHashAndPassword([]byte(singleton.Conf.LocalAuth.PasswordHash), []byte(input.Password)) == nil
 	validUser := strings.TrimSpace(input.Username) == singleton.Conf.LocalAuth.Username
 	if !validUser || !validPassword {
-		localRecordAttempt(client, false)
 		c.Redirect(http.StatusSeeOther, "/login?error=1")
 		return
 	}
@@ -185,7 +190,7 @@ func (gp *guestPage) localLogin(c *gin.Context) {
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
-	localRecordAttempt(client, true)
+	localResetAttempts(client)
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(singleton.Conf.Site.CookieName, token, int(localSessionAge.Seconds()),
 		"/", "", localSecureCookie(c), true)
