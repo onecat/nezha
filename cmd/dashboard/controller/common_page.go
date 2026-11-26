@@ -352,9 +352,7 @@ func (cp *commonPage) createTerminal(c *gin.Context) {
 		return
 	}
 
-	singleton.ServerLock.RLock()
-	server := singleton.ServerList[createTerminalReq.ID]
-	singleton.ServerLock.RUnlock()
+	server := singleton.SnapshotServer(createTerminalReq.ID)
 	if server == nil || server.TaskStream == nil {
 		mygin.ShowErrorPage(c, mygin.ErrInfo{
 			Code:  http.StatusForbidden,
@@ -439,9 +437,7 @@ func (cp *commonPage) createFM(c *gin.Context) {
 		return
 	}
 
-	singleton.ServerLock.RLock()
-	server := singleton.ServerList[uint64(serverId)]
-	singleton.ServerLock.RUnlock()
+	server := singleton.SnapshotServer(serverId)
 	if server == nil || server.TaskStream == nil {
 		mygin.ShowErrorPage(c, mygin.ErrInfo{
 			Code:  http.StatusForbidden,

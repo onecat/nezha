@@ -289,9 +289,7 @@ func natGateway(c *gin.Context) {
 		return
 	}
 
-	singleton.ServerLock.RLock()
-	server := singleton.ServerList[natConfig.ServerID]
-	singleton.ServerLock.RUnlock()
+	server := singleton.SnapshotServer(natConfig.ServerID)
 	if server == nil || server.TaskStream == nil {
 		c.Writer.WriteString("server not found or not connected")
 		c.Abort()

@@ -111,7 +111,7 @@ func (s *NezhaHandler) RequestTask(h *pb.Host, stream pb.NezhaService_RequestTas
 		return fmt.Errorf("agent no longer exists")
 	}
 	if server.TaskClose != nil { close(server.TaskClose) }
-	server.TaskStream = stream
+	server.TaskStream = newSerialTaskStream(stream)
 	server.TaskClose = closeCh
 	singleton.SortedServerLock.Unlock()
 	singleton.ServerLock.Unlock()
@@ -142,8 +142,11 @@ func (s *NezhaHandler) ReportSystemState(c context.Context, r *pb.State) (*pb.Re
 		return nil, err
 	}
 	state := model.PB2State(r)
-	singleton.ServerLock.RLock()
-	defer singleton.ServerLock.RUnlock()
+	singleton.ServerLock.Lock()
+	defer singleton.ServerLock.Unlock()
+	singleton.SortedServerLock.Lock()
+	defer singleton.SortedServerLock.Unlock()
+	if singleton.ServerList[clientID] == nil { return nil, fmt.Errorf("agent no longer exists") }
 	singleton.ServerList[clientID].LastActive = time.Now()
 	singleton.ServerList[clientID].State = &state
 
@@ -163,8 +166,11 @@ func (s *NezhaHandler) ReportSystemInfo(c context.Context, r *pb.Host) (*pb.Rece
 		return nil, err
 	}
 	host := model.PB2Host(r)
-	singleton.ServerLock.RLock()
-	defer singleton.ServerLock.RUnlock()
+	singleton.ServerLock.Lock()
+	defer singleton.ServerLock.Unlock()
+	singleton.SortedServerLock.Lock()
+	defer singleton.SortedServerLock.Unlock()
+	if singleton.ServerList[clientID] == nil { return nil, fmt.Errorf("agent no longer exists") }
 
 	// 检查并更新DDNS
 	if singleton.ServerList[clientID].EnableDDNS && host.IP != "" &&
@@ -207,7 +213,7 @@ func (s *NezhaHandler) ReportSystemInfo(c context.Context, r *pb.Host) (*pb.Rece
 	 * 当 agent 重启时，bootTime 变大，agent 端会先上报 host 信息，然后上报 state 信息
 	 * 这是可以借助上报顺序的空档，将停机前的流量统计数据标记下来，加到下一个小时的数据点上
 	 */
-	if singleton.ServerList[clientID].Host != nil && singleton.ServerList[clientID].Host.BootTime < host.BootTime {
+	if singleton.ServerList[clientID].Host != nil && singleton.ServerList[clientID].Host.BootTime < host.BootTime && singleton.ServerList[clientID].State != nil {
 		singleton.ServerList[clientID].PrevTransferInSnapshot = singleton.ServerList[clientID].PrevTransferInSnapshot - int64(singleton.ServerList[clientID].State.NetInTransfer)
 		singleton.ServerList[clientID].PrevTransferOutSnapshot = singleton.ServerList[clientID].PrevTransferOutSnapshot - int64(singleton.ServerList[clientID].State.NetOutTransfer)
 	}
@@ -257,12 +263,16 @@ func (s *NezhaHandler) LookupGeoIP(c context.Context, r *pb.GeoIP) (*pb.GeoIP, e
 	}
 
 	// 将地区码写入到 Host
-	singleton.ServerLock.RLock()
-	defer singleton.ServerLock.RUnlock()
-	if singleton.ServerList[clientID].Host == nil {
+	singleton.ServerLock.Lock()
+	defer singleton.ServerLock.Unlock()
+	singleton.SortedServerLock.Lock()
+	defer singleton.SortedServerLock.Unlock()
+	if singleton.ServerList[clientID] == nil || singleton.ServerList[clientID].Host == nil {
 		return nil, fmt.Errorf("host not found")
 	}
-	singleton.ServerList[clientID].Host.CountryCode = location
+	host := *singleton.ServerList[clientID].Host
+	host.CountryCode = location
+	singleton.ServerList[clientID].Host = &host
 
 	return &pb.GeoIP{Ip: ip, CountryCode: location}, nil
 }

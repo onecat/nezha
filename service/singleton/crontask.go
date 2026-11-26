@@ -95,9 +95,7 @@ func CronTrigger(cr model.Cron, triggerServer ...uint64) func() {
 			if len(triggerServer) == 0 {
 				return
 			}
-			ServerLock.RLock()
-			defer ServerLock.RUnlock()
-			if s, ok := ServerList[triggerServer[0]]; ok {
+			if s := SnapshotServer(triggerServer[0]); s != nil {
 				if s.TaskStream != nil {
 					SendTrackedTask(s, &pb.Task{
 						Id:   cr.ID,
@@ -114,9 +112,7 @@ func CronTrigger(cr model.Cron, triggerServer ...uint64) func() {
 			return
 		}
 
-		ServerLock.RLock()
-		defer ServerLock.RUnlock()
-		for _, s := range ServerList {
+		for _, s := range SnapshotSortedServers() {
 			if cr.Cover == model.CronCoverAll && crIgnoreMap[s.ID] {
 				continue
 			}

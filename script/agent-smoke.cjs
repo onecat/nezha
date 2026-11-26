@@ -123,6 +123,7 @@ async function runAgentSmoke(ctx,browser,base) {
       }
     }finally{await guest.close();}
     await runStreamSmoke(ctx,browser,base,publicID,work,post);
+    await require('./stability-smoke.cjs').runStabilitySmoke(ctx,browser,base,publicID);
   }finally{
     for(const child of children)await stop(child);
     // CI credentials are disposable; do not publish Agent log or its config.

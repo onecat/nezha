@@ -88,9 +88,7 @@ func main() {
 
 func dispatchReportInfoTask() {
 	time.Sleep(time.Second * 15)
-	singleton.ServerLock.RLock()
-	defer singleton.ServerLock.RUnlock()
-	for _, server := range singleton.ServerList {
+	for _, server := range singleton.SnapshotSortedServers() {
 		if server == nil || server.TaskStream == nil {
 			continue
 		}

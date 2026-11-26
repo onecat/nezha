@@ -73,3 +73,26 @@ func ReSortServer() {
 		return SortedServerListForGuest[i].DisplayIndex > SortedServerListForGuest[j].DisplayIndex
 	})
 }
+
+// SnapshotServer returns a stable copy of the current server record. A task
+// send can block on gRPC flow control; never perform it under global locks.
+func SnapshotServer(id uint64) *model.Server {
+	ServerLock.RLock()
+	defer ServerLock.RUnlock()
+	if s := ServerList[id]; s != nil { item := *s; return &item }
+	return nil
+}
+
+// SnapshotSortedServers reads the current map entries in display order.
+func SnapshotSortedServers() []*model.Server {
+	ServerLock.RLock()
+	defer ServerLock.RUnlock()
+	SortedServerLock.RLock()
+	defer SortedServerLock.RUnlock()
+	out := make([]*model.Server,0,len(SortedServerList))
+	for _, entry := range SortedServerList {
+		if entry == nil { continue }
+		if s:=ServerList[entry.ID]; s!=nil { item:=*s; out=append(out,&item) }
+	}
+	return out
+}

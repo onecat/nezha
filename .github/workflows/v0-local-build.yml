@@ -153,7 +153,7 @@ jobs:
           hash=$(htpasswd -nbBC 5 smoke "$password" | cut -d: -f2-)
           printf 'httpport: 18008\ngrpcport: 15555\nlanguage: en-US\nlocalauth:\n  username: smoke\n  passwordhash: "%s"\nsite:\n  brand: Nezha Smoke\n  theme: default\n' "$hash" > "$work/config.yaml"
           bin="$PWD/dist/nezha-app"
-          (cd "$work" && exec "$bin" -c "$work/config.yaml" --db "$work/smoke.db") > dashboard-smoke.log 2>&1 &
+          (cd "$work" && GODEBUG=gctrace=1 exec "$bin" -c "$work/config.yaml" --db "$work/smoke.db") > dashboard-smoke.log 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           for i in $(seq 1 60); do
@@ -161,7 +161,7 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:18008/login >/dev/null
-          NODE_PATH="$RUNNER_TEMP/nezha-browser/node_modules" SMOKE_PASSWORD="$password" SMOKE_AGENT_BINARY="$RUNNER_TEMP/nezha-agent-v0205/nezha-agent" node script/browser-smoke.cjs
+          NODE_PATH="$RUNNER_TEMP/nezha-browser/node_modules" SMOKE_DASHBOARD_PID="$pid" SMOKE_PASSWORD="$password" SMOKE_AGENT_BINARY="$RUNNER_TEMP/nezha-agent-v0205/nezha-agent" node script/browser-smoke.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -169,4 +169,5 @@ jobs:
           path: |
             dashboard-smoke.log
             browser-smoke.json
+            stability-smoke.json
           if-no-files-found: warn
