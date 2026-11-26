@@ -10,39 +10,79 @@ permissions:
   contents: read
 
 concurrency:
-  group: nezha-v0-local-${{ github.ref }}
-  cancel-in-progress: true
+  group: nezha-v0-local-release
+  cancel-in-progress: false
 
 jobs:
   build:
+    if: github.ref_name == 'v0.20.13-local-auth' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'master')
     name: Test and build Dashboard
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    outputs:
+      commit: ${{ steps.version.outputs.commit }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: v0.20.13-local-auth
+          ref: ${{ github.ref_name == 'master' && 'v0.20.13-local-auth' || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23.x"
+          go-version: '1.23.x'
           cache: true
+      - name: Set release version
+        id: version
+        run: |
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tag=v0.20.13-local-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
       - name: Verify local authentication
+        env:
+          CGO_ENABLED: '1'
         run: go test ./model ./pkg/mygin ./cmd/dashboard/controller
       - name: Build Linux AMD64
         env:
-          CGO_ENABLED: "1"
+          CGO_ENABLED: '1'
           GOOS: linux
           GOARCH: amd64
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags="-s -w" -o dist/nezha-dashboard-linux-amd64 ./cmd/dashboard
-          (cd dist && sha256sum nezha-dashboard-linux-amd64 > SHA256SUMS && zip -q nezha-dashboard-linux-amd64.zip nezha-dashboard-linux-amd64)
+          go build -trimpath -ldflags="-s -w -X github.com/naiba/nezha/service/singleton.Version=$RELEASE_TAG" -o dist/nezha-app ./cmd/dashboard
+          test "$(dist/nezha-app -v)" = "$RELEASE_TAG"
+          (cd dist && sha256sum nezha-app > SHA256SUMS)
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: nezha-v0.20.13-local-auth-linux-amd64
+          name: nezha-linux-amd64
           path: |
-            dist/nezha-dashboard-linux-amd64.zip
+            dist/nezha-app
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nezha-linux-amd64
+          path: dist
+      - name: Verify SHA256
+        run: cd dist && sha256sum -c SHA256SUMS
+      - name: Publish tested binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          SOURCE_SHA: ${{ needs.build.outputs.commit }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/nezha-app dist/SHA256SUMS \
+            --target "$SOURCE_SHA" --title "Nezha $RELEASE_TAG" \
+            --notes "Nezha Dashboard V0.20.13 with local administrator authentication. Linux AMD64 binary. Source: $SOURCE_SHA. V0 Agent protocol unchanged. Targeted authentication tests passed. Deployment and Agent integration testing remain recommended." \
+            --latest

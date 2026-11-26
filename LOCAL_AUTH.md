@@ -28,8 +28,14 @@ No web UI for password rotation is included in this initial version.
 ## Build
 
 Push to branch `v0.20.13-local-auth`; the dedicated GitHub Actions
-workflow tests and builds a Linux AMD64 binary. Find the ZIP under the
-successful run's artifacts. This workflow does not build Agent or Docker images.
+workflow tests and builds a Linux AMD64 binary, then publishes it as a GitHub Release.
+Each successful run has its own version tag (v0.20.13-local-rN).
+Download the latest binary and checksum from:
+
+- https://github.com/onecat/nezha/releases/latest/download/nezha-app
+- https://github.com/onecat/nezha/releases/latest/download/SHA256SUMS
+
+This workflow does not build Agent or Docker images.
 
 Local build: `go test ./model ./pkg/mygin ./cmd/dashboard/controller && go build -o dashboard ./cmd/dashboard`.
 
