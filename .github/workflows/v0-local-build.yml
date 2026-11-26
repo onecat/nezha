@@ -91,7 +91,9 @@ jobs:
           node-version: '22'
       - run: python3 script/vendor-assets.py
       - name: Check generated Bootstrap subset syntax
-        run: node --check resource/static/vendor/bootstrap-3.4.1/dist/js/bootstrap-server-status.js
+        run: |
+          node --check resource/static/vendor/bootstrap-3.4.1/dist/js/bootstrap-server-status.js
+          node --check resource/static/vendor/vue-2.7.16/dist/vue.min.js
       - name: Audit exact embedded npm package versions
         run: python3 script/audit-frontend.py
       - uses: actions/upload-artifact@v4

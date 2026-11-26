@@ -33,6 +33,38 @@ const results = [];
       results.push({theme,errors,external});
       await ctx.close();
     }
+    // Test the exact served asset, not a separately installed Vue package.
+    const securityCtx=await browser.newContext();
+    const securityPage=await securityCtx.newPage();
+    const securityErrors=[];
+    try {
+      await securityPage.goto(base+'/login');
+      const result=await securityPage.evaluate(() => {
+        const V=window.Vue;
+        if (!V || V.version!=='2.7.16' || typeof V.compile!=='function') throw Error('unexpected Vue compiler');
+        const valid=V.compile('<div><textarea>plain text</textarea><span>{{label}}</span></div>');
+        const vm=new V({data:{label:'ok'},render:valid.render,staticRenderFns:valid.staticRenderFns}).$mount();
+        if(vm.$el.querySelector('textarea').value!=='plain text' || vm.$el.querySelector('span').textContent!=='ok') throw Error('plain-text parser regression');
+        // Malformed plain-text content must be processed in bounded time.
+        const start=performance.now();
+        V.compile('<div><textarea>'+'x'.repeat(100000));
+        const elapsed=performance.now()-start;
+        if(elapsed>1500) throw Error('Vue compiler time budget exceeded: '+elapsed+' ms');
+        return {version:V.version,elapsed};
+      });
+      console.log('Vue compiler security test',JSON.stringify(result));
+      await securityCtx.addCookies([{name:'preferred_theme',value:'server-status',url:base}]);
+      await securityPage.goto(base+'/');
+      const plugins=await securityPage.evaluate(()=>{
+        const fn=window.jQuery.fn;
+        return Object.fromEntries(['modal','collapse','dropdown','button','tooltip','popover'].map(k=>[k,typeof fn[k]]));
+      });
+      for(const name of ['modal','collapse','dropdown']) if(plugins[name]!=='function') throw Error('missing plugin '+name);
+      for(const name of ['button','tooltip','popover']) if(plugins[name]!=='undefined') throw Error('unwanted plugin '+name);
+      console.log('Bootstrap subset',JSON.stringify(plugins));
+    } catch(e){securityErrors.push(e.stack||String(e));}
+    results.push({theme:'frontend-security',errors:securityErrors,external:[]});
+    await securityCtx.close();
     const ctx=await browser.newContext();
     const page=await ctx.newPage();
     const errors=[], external=[];

@@ -84,6 +84,36 @@ def copy_asset(base, dest, relative):
                 target_dep.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(dep, target_dep)
 
+def patch_vue_compiler(source):
+    # Vue 2.7.16 HTML parser: avoid repeatedly scanning the remainder of
+    # the template with the unanchored plain-text closing-tag expression.
+    # Match the exact vulnerable expression, preserving both capture groups
+    # and the replace callback's semantics. Fail closed if the source changes.
+    pattern = (
+        r"(?:new\s+)?RegExp\(\s*['\"]"
+        + re.escape(r"([\\s\\S]*?)(</")
+        + r"['\"]\s*\+\s*([a-zA-Z_$][\w$]*)\s*\+\s*['\"]"
+        + re.escape("[^>]*>)")
+        + r"['\"]\s*,\s*['\"]i['\"]\s*\)"
+    )
+    def replacement(match):
+        tag = match.group(1)
+        return (
+            '((tag)=>({[Symbol.replace](html,callback){'
+            'const m=new RegExp("</"+tag,"i").exec(html);'
+            'if(!m)return html;'
+            'const end=html.indexOf(">",m.index);'
+            'if(end<0)return html;'
+            'return callback(html.slice(0,end+1),html.slice(0,m.index),'
+            'html.slice(m.index,end+1))+html.slice(end+1);'
+            '}}))(' + tag + ')'
+        )
+    patched, count = re.subn(pattern, replacement, source)
+    if count != 1:
+        raise RuntimeError(f"Vue CVE-2024-9506 patch expected one match, got {count}")
+    return "/* Nezha local CVE-2024-9506 compiler patch */\n" + patched
+
+
 def localize(match):
     url = match.group(0)
     if "unpkg.com/" in url:
@@ -113,7 +143,11 @@ def localize(match):
     if name == "limonte-sweetalert2":
         relative = "dist/" + relative if not relative.startswith("dist/") else relative
     base, dest = get_package(name, version)
-    if name == "bootstrap" and relative == "dist/js/bootstrap.min.js":
+    if name == "vue" and version == "2.7.16" and relative == "dist/vue.min.js":
+        target = dest / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(patch_vue_compiler((base / relative).read_text(encoding="utf-8")), encoding="utf-8")
+    elif name == "bootstrap" and relative == "dist/js/bootstrap.min.js":
         # Keep the Bootstrap 3 layout and only the plugins actually used by
         # ServerStatus. Do not ship button, tooltip, popover or carousel.
         relative = "dist/js/bootstrap-server-status.js"
