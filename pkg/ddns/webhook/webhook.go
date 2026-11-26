@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -58,8 +59,14 @@ func (provider *Provider) SetRecords(ctx context.Context, zone string,
 		if err != nil {
 			return nil, fmt.Errorf("failed to update a domain: %s. Cause by: %v", provider.domain, err)
 		}
-		if _, err := utils.HttpClient.Do(req); err != nil {
+		resp, err := utils.WebhookClient(true).Do(req)
+		if err != nil {
 			return nil, fmt.Errorf("failed to update a domain: %s. Cause by: %v", provider.domain, err)
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 65536))
+		_ = resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("webhook returned HTTP %d", resp.StatusCode)
 		}
 	}
 

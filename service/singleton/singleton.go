@@ -48,6 +48,9 @@ func InitConfigFromPath(path string) {
 	if err != nil {
 		panic(err)
 	}
+	if err := utils.ConfigureWebhookPolicy(Conf.WebhookAllowedCIDRs); err != nil {
+		panic(err)
+	}
 }
 
 // InitDBFromPath 从给出的文件路径中加载数据库

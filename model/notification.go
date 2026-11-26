@@ -112,11 +112,7 @@ func (n *Notification) setRequestHeader(req *http.Request) error {
 func (ns *NotificationServerBundle) Send(message string) error {
 	var client *http.Client
 	n := ns.Notification
-	if n.VerifySSL != nil && *n.VerifySSL {
-		client = utils.HttpClient
-	} else {
-		client = utils.HttpClientSkipTlsVerify
-	}
+	client = utils.WebhookClient(n.VerifySSL == nil || *n.VerifySSL)
 
 	reqBody, err := ns.reqBody(message)
 	if err != nil {
@@ -148,10 +144,10 @@ func (ns *NotificationServerBundle) Send(message string) error {
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%d@%s %s", resp.StatusCode, resp.Status, string(body))
 	} else {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 65536))
 	}
 
 	return nil

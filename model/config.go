@@ -108,6 +108,8 @@ type Config struct {
 	AvgPingCount                   int
 
 	DNSServers string
+	// Explicitly allowed private network destinations for Dashboard webhooks.
+	WebhookAllowedCIDRs []string `koanf:"webhookallowedcidrs" yaml:"webhookallowedcidrs"`
 
 	k        *koanf.Koanf
 	filePath string
