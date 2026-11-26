@@ -90,6 +90,8 @@ jobs:
         with:
           node-version: '22'
       - run: python3 script/vendor-assets.py
+      - name: Check generated Bootstrap subset syntax
+        run: node --check resource/static/vendor/bootstrap-3.4.1/dist/js/bootstrap-server-status.js
       - name: Audit exact embedded npm package versions
         run: python3 script/audit-frontend.py
       - uses: actions/upload-artifact@v4
@@ -100,4 +102,52 @@ jobs:
             .frontend-packages.json
             frontend-audit.json
           include-hidden-files: true
+          if-no-files-found: warn
+  browser-smoke:
+    needs: verify
+    if: github.ref_name == 'security-v0.30.05'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: nezha-v0.30.05-dev
+          path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare isolated browser test
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y apache2-utils
+          npm install --prefix "$RUNNER_TEMP/nezha-browser" --ignore-scripts --no-audit --no-fund playwright@1.56.1
+          "$RUNNER_TEMP/nezha-browser/node_modules/.bin/playwright" install --with-deps chromium
+          chmod +x dist/nezha-app
+      - name: Start local Dashboard and test offline pages
+        run: |
+          set -eu
+          work=$(mktemp -d)
+          password=$(openssl rand -hex 18)
+          hash=$(htpasswd -nbBC 5 smoke "$password" | cut -d: -f2-)
+          printf 'httpport: 18008\ngrpcport: 15555\nlanguage: en-US\nlocalauth:\n  username: smoke\n  passwordhash: "%s"\nsite:\n  brand: Nezha Smoke\n  theme: default\n' "$hash" > "$work/config.yaml"
+          bin="$PWD/dist/nezha-app"
+          (cd "$work" && exec "$bin" -c "$work/config.yaml" --db "$work/smoke.db") > dashboard-smoke.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18008/login >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18008/login >/dev/null
+          NODE_PATH="$RUNNER_TEMP/nezha-browser/node_modules" SMOKE_PASSWORD="$password" node script/browser-smoke.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-smoke-report
+          path: |
+            dashboard-smoke.log
+            browser-smoke.json
           if-no-files-found: warn

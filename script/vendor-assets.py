@@ -120,7 +120,7 @@ def localize(match):
         target = dest / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         plugins = ("transition", "collapse", "dropdown", "modal")
-        target.write_text("\\n;\\n".join((base / "js" / (plugin + ".js")).read_text(encoding="utf-8") for plugin in plugins), encoding="utf-8")
+        target.write_text("\n;\n".join((base / "js" / (plugin + ".js")).read_text(encoding="utf-8") for plugin in plugins), encoding="utf-8")
     else:
         copy_asset(base, dest, relative)
     return "/static/vendor/" + dest.name + "/" + relative
