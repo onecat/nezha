@@ -94,12 +94,14 @@ def localize(match):
     else:
         value = re.sub(r"^https://[^/]+/cdn/expire-[^/]+/", "", url)
         name, version, relative = value.split("/", 2)
-    base, dest = get_package(name, version)
     # Normalize CDN aliases to their actual npm paths before copying.
+    if name == "bootstrap-icons" and version == "1.8.1":
+        version = "1.11.3"
     if name == "font-logos" and relative == "font-logos.min.css":
         relative = "assets/font-logos.css"
     if name == "limonte-sweetalert2":
         relative = "dist/" + relative if not relative.startswith("dist/") else relative
+    base, dest = get_package(name, version)
     copy_asset(base, dest, relative)
     return "/static/vendor/" + dest.name + "/" + relative
 
