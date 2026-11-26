@@ -29,7 +29,7 @@ No web UI for password rotation is included in this initial version.
 
 Push to branch `v0.20.13-local-auth`; the dedicated GitHub Actions
 workflow tests and builds a Linux AMD64 binary, then publishes it as a GitHub Release.
-Each successful run has its own version tag (v0.20.13-local-rN).
+Build numbering starts at v0.30.00 (workflow run 3), then increments once per new workflow run: v0.30.01, v0.30.02, and so on. Failed runs consume a number but do not publish a release. Reruns keep the same version; published releases are not overwritten.
 Download the latest binary and checksum from:
 
 - https://github.com/onecat/nezha/releases/latest/download/nezha-app
