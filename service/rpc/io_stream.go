@@ -26,7 +26,7 @@ type ioStreamContext struct {
 	started bool
 }
 
-var bufPool = sync.Pool{New: func() any { b := make([]byte, 64*1024); return &b }}
+var bufPool = sync.Pool{New: func() any { b := make([]byte, 1024*1024); return &b }}
 var errStream = errors.New("stream unavailable")
 
 func (s *NezhaHandler) CreateStream(id string, ownerID, agentID uint64, kind StreamKind) error {

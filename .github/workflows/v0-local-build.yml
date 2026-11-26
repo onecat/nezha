@@ -10,8 +10,43 @@ concurrency:
   cancel-in-progress: false
 jobs:
 
+  resolve-security-patches:
+    if: github.ref_name == 'security-v0.30.05'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.4'
+          cache: true
+      - name: Resolve exact advisory fixes
+        run: |
+          go get github.com/gorilla/websocket@v1.5.4-0.20240701034025-d67f41855da4 github.com/quic-go/quic-go@v0.59.1
+          go mod tidy
+          go mod verify
+          echo BEGIN_GO_MOD
+          cat go.mod
+          echo END_GO_MOD
+          echo BEGIN_GO_SUM
+          cat go.sum
+          echo END_GO_SUM
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resolved-go-modules
+          path: |
+            go.mod
+            go.sum
+          if-no-files-found: error
+
 
   verify:
+    needs: resolve-security-patches
     if: github.ref_name == 'security-v0.30.05'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -27,6 +62,9 @@ jobs:
         with:
           go-version: '1.27.4'
           cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: resolved-go-modules
       - name: Go toolchain and embedded frontend
         run: |
           go version
@@ -53,6 +91,7 @@ jobs:
           path: dist/
           if-no-files-found: error
   vulnerability-scan:
+    needs: resolve-security-patches
     if: github.ref_name == 'security-v0.30.05'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -67,6 +106,9 @@ jobs:
         with:
           go-version: '1.27.4'
           cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: resolved-go-modules
       - run: python3 script/vendor-assets.py
       - name: Scan reachable Go vulnerabilities
         run: |
