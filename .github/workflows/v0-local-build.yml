@@ -139,32 +139,7 @@ jobs:
             release="https://github.com/nezhahq/agent/releases/download/v0.20.5"
             curl --fail --location --retry 2 "$release/nezha-agent_linux_amd64.zip" -o nezha-agent_linux_amd64.zip
             curl --fail --location --retry 2 "$release/checksums.txt" -o checksums.txt
-            grep -E '^[0-9a-fA-F]{64}[[:space:]]+\*?nezha-agent_linux_amd64\.zip      - name: Start local Dashboard and test offline pages
-        run: |
-          set -eu
-          work=$(mktemp -d)
-          password=$(openssl rand -hex 18)
-          hash=$(htpasswd -nbBC 5 smoke "$password" | cut -d: -f2-)
-          printf 'httpport: 18008\ngrpcport: 15555\nlanguage: en-US\nlocalauth:\n  username: smoke\n  passwordhash: "%s"\nsite:\n  brand: Nezha Smoke\n  theme: default\n' "$hash" > "$work/config.yaml"
-          bin="$PWD/dist/nezha-app"
-          (cd "$work" && exec "$bin" -c "$work/config.yaml" --db "$work/smoke.db") > dashboard-smoke.log 2>&1 &
-          pid=$!
-          trap 'kill "$pid" 2>/dev/null || true' EXIT
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:18008/login >/dev/null; then break; fi
-            sleep 1
-          done
-          curl -fsS http://127.0.0.1:18008/login >/dev/null
-          NODE_PATH="$RUNNER_TEMP/nezha-browser/node_modules" SMOKE_PASSWORD="$password" SMOKE_AGENT_BINARY="$RUNNER_TEMP/nezha-agent-v0205/nezha-agent" node script/browser-smoke.cjs
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: browser-smoke-report
-          path: |
-            dashboard-smoke.log
-            browser-smoke.json
-          if-no-files-found: warn
- checksums.txt > selected.sha256
+            grep -E '^[0-9a-fA-F]{64}[[:space:]]+\*?nezha-agent_linux_amd64\.zip$' checksums.txt > selected.sha256
             sha256sum -c selected.sha256
             unzip -q nezha-agent_linux_amd64.zip
             test -f nezha-agent
@@ -186,7 +161,7 @@ jobs:
             sleep 1
           done
           curl -fsS http://127.0.0.1:18008/login >/dev/null
-          NODE_PATH="$RUNNER_TEMP/nezha-browser/node_modules" SMOKE_PASSWORD="$password" node script/browser-smoke.cjs
+          NODE_PATH="$RUNNER_TEMP/nezha-browser/node_modules" SMOKE_PASSWORD="$password" SMOKE_AGENT_BINARY="$RUNNER_TEMP/nezha-agent-v0205/nezha-agent" node script/browser-smoke.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

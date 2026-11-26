@@ -133,6 +133,9 @@ def localize(match):
         version = "3.7.1"
     if name == "vue":
         version = "2.7.16"
+        if relative not in ("vue.js", "vue.min.js", "dist/vue.js", "dist/vue.min.js"):
+            raise RuntimeError("Unexpected Vue asset: " + relative)
+        relative = "dist/vue.min.js"
     if name == "echarts":
         version = "6.1.0"
     # Normalize CDN aliases to their actual npm paths before copying.
