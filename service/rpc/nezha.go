@@ -43,6 +43,19 @@ func (s *NezhaHandler) ReportTask(c context.Context, r *pb.TaskResult) (*pb.Rece
 	if clientID, err = s.Auth.Check(c); err != nil {
 		return nil, err
 	}
+	if r == nil {
+		return &pb.Receipt{Proced: false}, nil
+	}
+	switch r.GetType() {
+	case model.TaskTypeCommand, model.TaskTypeHTTPGet, model.TaskTypeICMPPing, model.TaskTypeTCPPing:
+		if !singleton.ConsumeTrackedTask(clientID, r.GetId(), r.GetType()) {
+			return &pb.Receipt{Proced: false}, nil
+		}
+	default:
+		// Existing agents may report results for non-monitored control tasks.
+		// Acknowledge without passing these into the monitor or command pipeline.
+		return &pb.Receipt{Proced: true}, nil
+	}
 	if r.GetType() == model.TaskTypeCommand {
 		// 处理上报的计划任务
 		singleton.CronLock.RLock()
@@ -51,6 +64,9 @@ func (s *NezhaHandler) ReportTask(c context.Context, r *pb.TaskResult) (*pb.Rece
 		if cr != nil {
 			singleton.ServerLock.RLock()
 			defer singleton.ServerLock.RUnlock()
+			if singleton.ServerList[clientID] == nil {
+				return &pb.Receipt{Proced: false}, nil
+			}
 			// 保存当前服务器状态信息
 			curServer := model.Server{}
 			copier.Copy(&curServer, singleton.ServerList[clientID])
