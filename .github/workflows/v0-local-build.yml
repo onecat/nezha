@@ -35,10 +35,7 @@ jobs:
         id: version
         run: |
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          # Run 4 starts the consolidated internal release at v0.30.03.
-          patch=$((GITHUB_RUN_NUMBER - 1))
-          test "$patch" -ge 0
-          printf 'tag=v0.30.%02d\n' "$patch" >> "$GITHUB_OUTPUT"
+          echo "tag=v0.30.03" >> "$GITHUB_OUTPUT"
       - name: Embed offline frontend assets
         run: python3 script/vendor-assets.py
       - name: Verify local authentication
