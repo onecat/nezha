@@ -131,23 +131,16 @@ func (v *apiV1) monitorHistoriesById(c *gin.Context) {
 		c.AbortWithStatusJSON(400, gin.H{"code": 400, "message": "id参数错误"})
 		return
 	}
-	server, ok := singleton.ServerList[id]
-	if !ok {
-		c.AbortWithStatusJSON(404, gin.H{
-			"code":    404,
-			"message": "id不存在",
-		})
+	singleton.ServerLock.RLock()
+	exists:=singleton.ServerList[id]!=nil
+	singleton.ServerLock.RUnlock()
+	if !exists {
+		c.AbortWithStatusJSON(404,gin.H{"code":404,"message":"id不存在"})
 		return
 	}
-
-	_, isMember := c.Get(model.CtxKeyAuthorizedUser)
-	_, isViewPasswordVerfied := c.Get(model.CtxKeyViewPasswordVerified)
-	authorized := isMember || isViewPasswordVerfied
-
-	if server.HideForGuest && !authorized {
-		c.AbortWithStatusJSON(403, gin.H{"code": 403, "message": "需要认证"})
+	if !canViewServer(c,id) {
+		c.AbortWithStatusJSON(403,gin.H{"code":403,"message":"需要认证"})
 		return
 	}
-
-	c.JSON(200, singleton.MonitorAPI.GetMonitorHistories(map[string]any{"server_id": server.ID}))
+	c.JSON(200,singleton.MonitorAPI.GetMonitorHistories(map[string]any{"server_id":id}))
 }

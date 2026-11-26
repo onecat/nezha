@@ -297,6 +297,7 @@ func (m *MonitorAPIService) GetMonitorHistories(query map[string]any) *MonitorIn
 		sortedMonitorIDs []uint64
 	)
 	res := &MonitorInfoResponse{
+		Result: make([]*MonitorInfo,0),
 		CommonResponse: CommonResponse{
 			Code:    0,
 			Message: "success",
@@ -310,14 +311,27 @@ func (m *MonitorAPIService) GetMonitorHistories(query map[string]any) *MonitorIn
 			Message: err.Error(),
 		}
 	} else {
+		monitorNames:=make(map[uint64]string)
+		if ServiceSentinelShared!=nil {
+			ServiceSentinelShared.monitorsLock.RLock()
+			for id,m:=range ServiceSentinelShared.monitors {if m!=nil {monitorNames[id]=m.Name}}
+			ServiceSentinelShared.monitorsLock.RUnlock()
+		}
+		serverNames:=make(map[uint64]string)
+		ServerLock.RLock()
+		for id,s:=range ServerList {if s!=nil {serverNames[id]=s.Name}}
+		ServerLock.RUnlock()
 		for _, history := range monitorHistories {
+			monitorName,monitorOK:=monitorNames[history.MonitorID]
+			serverName,serverOK:=serverNames[history.ServerID]
+			if !monitorOK || !serverOK {continue}
 			infos, ok := resultMap[history.MonitorID]
 			if !ok {
 				infos = &MonitorInfo{
 					MonitorID:   history.MonitorID,
 					ServerID:    history.ServerID,
-					MonitorName: ServiceSentinelShared.monitors[history.MonitorID].Name,
-					ServerName:  ServerList[history.ServerID].Name,
+					MonitorName: monitorName,
+					ServerName:  serverName,
 				}
 				resultMap[history.MonitorID] = infos
 				sortedMonitorIDs = append(sortedMonitorIDs, history.MonitorID)
