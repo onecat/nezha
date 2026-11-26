@@ -1,0 +1,24 @@
+name: Managed Agent upgrade - development checks
+on:
+  push:
+    branches: [agent-upgrade-v0.30.06]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package-verification:
+    if: github.ref_name == 'agent-upgrade-v0.30.06'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Verify package security rules
+        run: |
+          go test -race -count=1 -v ./pkg/agentupgrade
+          go vet ./pkg/agentupgrade
