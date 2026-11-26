@@ -87,6 +87,16 @@ func (s *NezhaHandler) UserConnected(id string, ownerID uint64, kind StreamKind,
 	return nil
 }
 
+// agentStreamKind is a read-only lookup. AgentConnected still atomically
+// enforces ownership and single attachment before publishing the connection.
+func (s *NezhaHandler) agentStreamKind(id string, agentID uint64) (StreamKind, bool) {
+	s.ioStreamMutex.RLock()
+	defer s.ioStreamMutex.RUnlock()
+	ctx := s.ioStreams[id]
+	if ctx == nil || ctx.agentID != agentID || ctx.agentIo != nil { return 0, false }
+	return ctx.kind, true
+}
+
 func (s *NezhaHandler) AgentConnected(id string, agentID uint64, conn io.ReadWriteCloser) error {
 	s.ioStreamMutex.Lock()
 	defer s.ioStreamMutex.Unlock()

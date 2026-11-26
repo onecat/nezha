@@ -82,15 +82,18 @@ async function runStreamSmoke(ctx,browser,base,id,work,post) {
     console.log('Real V0.20.5 multi-chunk file download passed');
     // NAT points exclusively to a local disposable HTTP fixture.
     const backend=http.createServer((req,res)=>{
-      res.writeHead(200,{'Content-Type':'text/plain','Connection':'close'});
-      res.end('nezha-ci-nat-ok');
+      const payload=req.url==='/eof'?'EOF':'nezha-ci-nat-ok';
+      const headers={'Content-Type':'text/plain','Connection':'close'};
+      if(req.url==='/fixed'||req.url==='/eof')headers['Content-Length']=Buffer.byteLength(payload);
+      res.writeHead(200,headers);
+      res.end(payload);
     });
     await new Promise((resolve,reject)=>{backend.once('error',reject);backend.listen(0,'127.0.0.1',resolve);});
     try {
       await post('/api/nat',{Name:'ci-nat',Domain:'nezha-ci-nat.invalid',Host:'127.0.0.1:'+backend.address().port,ServerID:id});
-      for(let i=0;i<5;i++){
+      for(const route of ['/','/fixed','/eof','/','/fixed']){
         const body=await new Promise((resolve,reject)=>{
-          const req=http.get(base+'/',{headers:{Host:'nezha-ci-nat.invalid',Connection:'close'},timeout:15000},res=>{
+          const req=http.get(base+route,{headers:{Host:'nezha-ci-nat.invalid',Connection:'close'},timeout:15000},res=>{
             let data='';res.setEncoding('utf8');res.on('data',chunk=>data+=chunk);
             res.on('end',()=>res.statusCode===200?resolve(data):reject(Error('NAT status '+res.statusCode)));
             res.on('error',reject);
@@ -98,7 +101,7 @@ async function runStreamSmoke(ctx,browser,base,id,work,post) {
           req.on('timeout',()=>req.destroy(Error('NAT timeout')));
           req.on('error',reject);
         });
-        if(body!=='nezha-ci-nat-ok')throw Error('NAT body mismatch');
+        if(body!==(route==='/eof'?'EOF':'nezha-ci-nat-ok'))throw Error('NAT body mismatch: '+route);
       }
       console.log('Real V0.20.5 NAT five sequential HTTP round trips passed');
     }finally{backend.closeAllConnections();await new Promise(resolve=>backend.close(resolve));}

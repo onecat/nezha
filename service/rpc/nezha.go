@@ -230,7 +230,10 @@ func (s *NezhaHandler) IOStream(stream pb.NezhaService_IOStreamServer) error {
 		return fmt.Errorf("invalid stream id")
 	}
 	streamId := string(id.Data[4:])
+	kind, ok := s.agentStreamKind(streamId, clientID)
+	if !ok { return fmt.Errorf("stream unavailable") }
 	iw := grpcx.NewIOStreamWrapper(stream)
+	if kind == StreamNAT { iw = grpcx.NewLegacyNATStreamWrapper(stream) }
 	if err := s.AgentConnected(streamId, clientID, iw); err != nil { return err }
 	defer s.CloseStream(streamId)
 	iw.Wait()
