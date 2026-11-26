@@ -1,90 +1,75 @@
-name: Nezha V0 Local Auth - Linux AMD64
-
+name: Nezha v0.30.05 - Development CI
 on:
   push:
-    branches:
-      - v0.20.13-local-auth
+    branches: [security-v0.30.05]
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
-  group: nezha-v0-local-release
-  cancel-in-progress: false
-
+  group: nezha-v03005-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  build:
-    if: github.ref_name == 'v0.20.13-local-auth' || (github.event_name == 'workflow_dispatch' && github.ref_name == 'master')
-    name: Test and build Dashboard
+  verify:
+    if: github.ref_name == 'security-v0.30.05'
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    outputs:
-      commit: ${{ steps.version.outputs.commit }}
-      tag: ${{ steps.version.outputs.tag }}
+    timeout-minutes: 45
+    env:
+      CGO_ENABLED: '1'
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name == 'master' && 'v0.20.13-local-auth' || github.sha }}
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23.x'
+          go-version: '1.27.4'
           cache: true
-      - name: Set release version
-        id: version
+      - name: Go toolchain and embedded frontend
         run: |
-          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "tag=v0.30.03" >> "$GITHUB_OUTPUT"
-      - name: Embed offline frontend assets
-        run: python3 script/vendor-assets.py
-      - name: Verify local authentication
-        env:
-          CGO_ENABLED: '1'
-        run: go test ./model ./pkg/mygin ./cmd/dashboard/controller
-      - name: Build Linux AMD64
-        env:
-          CGO_ENABLED: '1'
-          GOOS: linux
-          GOARCH: amd64
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          go version
+          python3 script/vendor-assets.py
+      - name: Module integrity
+        run: go mod verify
+      - name: Run all tests
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Race detector
+        run: go test -race ./...
+      - name: Build development binary
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags="-s -w -X github.com/naiba/nezha/service/singleton.Version=$RELEASE_TAG" -o dist/nezha-app ./cmd/dashboard
-          test "$(dist/nezha-app -v)" = "$RELEASE_TAG"
+          go build -trimpath -ldflags='-s -w -X github.com/naiba/nezha/service/singleton.Version=v0.30.05-dev' -o dist/nezha-app ./cmd/dashboard
+          test "$(dist/nezha-app -v)" = 'v0.30.05-dev'
           (cd dist && sha256sum nezha-app > SHA256SUMS)
-      - name: Upload executable
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: nezha-linux-amd64
-          path: |
-            dist/nezha-app
-            dist/SHA256SUMS
+          name: nezha-v0.30.05-dev
+          path: dist/
           if-no-files-found: error
-          retention-days: 30
-
-  release:
-    name: Publish GitHub Release
-    needs: build
+  vulnerability-scan:
+    if: github.ref_name == 'security-v0.30.05'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: '1'
+      GOTOOLCHAIN: local
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          name: nezha-linux-amd64
-          path: dist
-      - name: Verify SHA256
-        run: cd dist && sha256sum -c SHA256SUMS
-      - name: Publish tested binary
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ needs.build.outputs.tag }}
-          SOURCE_SHA: ${{ needs.build.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.4'
+          cache: true
+      - run: python3 script/vendor-assets.py
+      - name: Scan reachable Go vulnerabilities
         run: |
-          gh release create "$RELEASE_TAG" dist/nezha-app dist/SHA256SUMS \
-            --target "$SOURCE_SHA" --title "Nezha $RELEASE_TAG" \
-            --notes "Nezha Dashboard V0.20.13 with local authentication and embedded frontend assets. Linux AMD64 binary. Source: $SOURCE_SHA. V0 Agent protocol unchanged. Targeted authentication tests passed. Deployment and Agent integration testing remain recommended." \
-            --latest
+          set -o pipefail
+          go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1 | tee govulncheck.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: govulncheck-report
+          path: govulncheck.txt
+          if-no-files-found: warn

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/naiba/nezha/model"
 	"github.com/naiba/nezha/service/singleton"
@@ -57,18 +58,20 @@ func Authorize(opt AuthorizeOption) func(*gin.Context) {
 			}
 		}
 
-		// API鉴权
-		if opt.AllowAPI {
+		// API tokens authenticate their actual owner. A valid browser session
+		// takes precedence over Authorization (which may contain proxy Basic auth).
+		if opt.AllowAPI && !isLogin {
 			apiToken := c.GetHeader("Authorization")
 			if apiToken != "" {
-				var u model.User
 				singleton.ApiLock.RLock()
-				if _, ok := singleton.ApiTokenList[apiToken]; ok {
-					err := singleton.DB.First(&u).Where("id = ?", singleton.ApiTokenList[apiToken].UserID).Error
-					isLogin = err == nil
+				token, ok := singleton.ApiTokenList[apiToken]
+				var userID uint64
+				if ok && token != nil {
+					userID = token.UserID
 				}
 				singleton.ApiLock.RUnlock()
-				if isLogin {
+				if u, ok := lookupAPIUser(singleton.DB, userID); ok {
+					isLogin = true
 					c.Set(model.CtxKeyAuthorizedUser, &u)
 					c.Set("isAPI", true)
 				}
@@ -87,4 +90,13 @@ func Authorize(opt AuthorizeOption) func(*gin.Context) {
 			return
 		}
 	}
+}
+
+func lookupAPIUser(db *gorm.DB, userID uint64) (model.User, bool) {
+	var user model.User
+	if userID == 0 {
+		return user, false
+	}
+	err := db.Where("id = ?", userID).First(&user).Error
+	return user, err == nil
 }
