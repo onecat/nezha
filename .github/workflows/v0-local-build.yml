@@ -35,7 +35,10 @@ jobs:
         id: version
         run: |
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "tag=v0.20.13-local-r${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          # Run 3 is the first release in the v0.30 series.
+          patch=$((GITHUB_RUN_NUMBER - 3))
+          test "$patch" -ge 0
+          printf 'tag=v0.30.%02d\n' "$patch" >> "$GITHUB_OUTPUT"
       - name: Verify local authentication
         env:
           CGO_ENABLED: '1'
