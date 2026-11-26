@@ -8,7 +8,11 @@ permissions:
 jobs:
   package-verification:
     if: github.ref_name == 'agent-upgrade-v0.30.06'
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +22,7 @@ jobs:
         with:
           go-version: '1.27.4'
           cache: false
-      - name: Verify package security rules
+      - name: Verify package security and offline tool
         run: |
-          go test -race -count=1 -v ./pkg/agentupgrade
-          go vet ./pkg/agentupgrade
+          go test -race -count=1 -v ./pkg/agentupgrade ./cmd/agent-package
+          go vet ./pkg/agentupgrade ./cmd/agent-package
