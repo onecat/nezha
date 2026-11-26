@@ -44,6 +44,13 @@ func Authorize(opt AuthorizeOption) func(*gin.Context) {
 			var u model.User
 			if err := singleton.DB.Where("token = ?", token).First(&u).Error; err == nil {
 				isLogin = u.TokenExpired.After(time.Now())
+				if isLogin {
+					if singleton.Conf.Oauth2.Type == model.ConfigTypeLocal {
+						isLogin = u.Login == "local:"+singleton.Conf.LocalAuth.Username
+					} else if strings.HasPrefix(u.Login, "local:") {
+						isLogin = false
+					}
+				}
 			}
 			if isLogin {
 				c.Set(model.CtxKeyAuthorizedUser, &u)

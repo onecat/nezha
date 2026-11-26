@@ -69,6 +69,17 @@ func InitDBFromPath(path string) {
 	if err != nil {
 		panic(err)
 	}
+	// Changing local credentials requires a restart. Invalidate previous sessions.
+	if Conf.Oauth2.Type == model.ConfigTypeLocal {
+		if err := DB.Model(&model.User{}).
+			Where("login = ?", "local:"+Conf.LocalAuth.Username).
+			Updates(map[string]interface{}{
+				"token": "",
+				"token_expired": time.Now(),
+			}).Error; err != nil {
+			panic(err)
+		}
+	}
 }
 
 // RecordTransferHourlyUsage 对流量记录进行打点

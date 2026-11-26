@@ -11,6 +11,7 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 	"gopkg.in/yaml.v3"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var Languages = map[string]string{
@@ -36,6 +37,7 @@ var DashboardThemes = map[string]string{
 }
 
 const (
+	ConfigTypeLocal      = "local"
 	ConfigTypeGitHub     = "github"
 	ConfigTypeGitee      = "gitee"
 	ConfigTypeGitlab     = "gitlab"
@@ -52,6 +54,10 @@ const (
 
 // Config 站点配置
 type Config struct {
+	LocalAuth struct {
+		Username string `koanf:"username"`
+		PasswordHash string `koanf:"passwordhash" json:"-"`
+	} `koanf:"localauth"`
 	Debug    bool   // debug模式开关
 	Language string // 系统语言，默认 zh-CN
 	Site     struct {
@@ -133,7 +139,14 @@ func (c *Config) Read(path string) error {
 		return err
 	}
 
-	if c.Oauth2.Type == "" || c.Oauth2.Admin == "" || c.Oauth2.ClientID == "" || c.Oauth2.ClientSecret == "" {
+	if c.Oauth2.Type == ConfigTypeLocal {
+		if c.LocalAuth.Username == "" {
+			return errors.New("missing localauth.username")
+		}
+		if _, err := bcrypt.Cost([]byte(c.LocalAuth.PasswordHash)); err != nil {
+			return errors.New("invalid localauth.passwordhash: expected bcrypt hash")
+		}
+	} else if c.Oauth2.Type == "" || c.Oauth2.Admin == "" || c.Oauth2.ClientID == "" || c.Oauth2.ClientSecret == "" {
 		return errors.New("missing oauth2 config")
 	}
 

@@ -27,14 +27,29 @@ func (gp *guestPage) serve() {
 	}))
 
 	gr.GET("/login", gp.login)
-
-	oauth := &oauth2controller{
-		r: gr,
+	if singleton.Conf.Oauth2.Type == model.ConfigTypeLocal {
+		gr.POST("/local/login", gp.localLogin)
+	} else {
+		oauth := &oauth2controller{r: gr}
+		oauth.serve()
 	}
-	oauth.serve()
 }
 
 func (gp *guestPage) login(c *gin.Context) {
+	if singleton.Conf.Oauth2.Type == model.ConfigTypeLocal {
+		token, err := newLocalCSRF(c)
+		if err != nil {
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		c.HTML(http.StatusOK, "dashboard-default/login", mygin.CommonEnvironment(c, gin.H{
+			"Title": "管理员登录",
+			"LocalAuthEnabled": true,
+			"CSRFToken": token,
+			"LoginError": c.Query("error") == "1",
+		}))
+		return
+	}
 	if singleton.Conf.Oauth2.OidcAutoLogin {
 		c.Redirect(http.StatusFound, "/oauth2/login")
 		return
