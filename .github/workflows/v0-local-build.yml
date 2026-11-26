@@ -78,3 +78,26 @@ jobs:
           name: govulncheck-report
           path: govulncheck.txt
           if-no-files-found: warn
+  frontend-audit:
+    if: github.ref_name == 'security-v0.30.05'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python3 script/vendor-assets.py
+      - name: Audit exact embedded npm package versions
+        run: python3 script/audit-frontend.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-audit
+          path: |
+            .frontend-packages.json
+            frontend-audit.json
+          include-hidden-files: true
+          if-no-files-found: warn

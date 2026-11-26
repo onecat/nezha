@@ -6,28 +6,27 @@ import (
 	"os"
 )
 
-// HybridFS combines embed.FS and os.DirFS.
+// HybridFS prefers embedded resources and confines custom files to their root.
 type HybridFS struct {
-	embedFS, dir fs.FS
+	embedFS fs.FS
+	localDir string
 }
 
-func NewHybridFS(embed embed.FS, subDir string, localDir string) (*HybridFS, error) {
-	subFS, err := fs.Sub(embed, subDir)
-	if err != nil {
-		return nil, err
-	}
-
-	return &HybridFS{
-		embedFS: subFS,
-		dir:     os.DirFS(localDir),
-	}, nil
+func NewHybridFS(embedded embed.FS, subDir string, localDir string) (*HybridFS, error) {
+	subFS, err := fs.Sub(embedded, subDir)
+	if err != nil { return nil, err }
+	return &HybridFS{embedFS: subFS, localDir: localDir}, nil
 }
 
 func (hfs *HybridFS) Open(name string) (fs.File, error) {
-	// Ensure embed files are not replaced
+	if !fs.ValidPath(name) { return nil, &fs.PathError{Op:"open", Path:name, Err:fs.ErrInvalid} }
 	if file, err := hfs.embedFS.Open(name); err == nil {
 		return file, nil
 	}
-
-	return hfs.dir.Open(name)
+	// OpenRoot prevents traversal through symlinks as well as lexical '..'.
+	// Open on demand so deployments without a custom directory still work.
+	root, err := os.OpenRoot(hfs.localDir)
+	if err != nil { return nil, err }
+	defer root.Close()
+	return root.FS().Open(name)
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Localize bundled templates using exact npm package versions at build time."""
 import pathlib
+import json
 import re
 import subprocess
 import tempfile
@@ -118,4 +119,11 @@ for file in sorted((RESOURCE / "template").rglob("*.html")):
         raise RuntimeError(f"External runtime dependency remains in {file}")
     file.write_text(s, encoding="utf-8")
 
+inventory = []
+for (name, version), (base, dest) in sorted(PACKAGES.items()):
+    metadata = json.loads((base / "package.json").read_text(encoding="utf-8"))
+    if metadata.get("name") != name:
+        raise RuntimeError("Unexpected package name: " + name)
+    inventory.append({"name": name, "version": metadata["version"], "directory": dest.name})
+(ROOT / ".frontend-packages.json").write_text(json.dumps(inventory, indent=2) + "\n", encoding="utf-8")
 print("Embedded frontend packages:", len(PACKAGES))
