@@ -7,6 +7,8 @@ Baseline: Dashboard v0.30.05, Agent v0.20.5. Legacy Agents require manual migrat
 ## Implemented foundation
 
 - Common NZU verifier: bounded ZIP, exact three entries, raw signed JSON, Ed25519 pre-provisioned keys, SHA256, immutable package digest and forward-only release policy.
+- Offline package builder and CLI with independently verified output, Windows/Linux CI tests; signing key never belongs on Dashboard or CI.
+- Shared transaction transition validator with identity/package binding and expiry; rollback is allowed after expiry. **This is not durable storage or an Agent installer.**
 - Release sequence is a monotonically increasing uint64; the Agent must persist its highest accepted sequence independently of rollback. Version numbers allow the project's zero-padded notation.
 - Signature file contains exactly 64 raw bytes; manifest is UTF-8 JSON. Linux/macOS/FreeBSD use nezha-agent; Windows uses nezha-agent.exe. Allowed platform tuple does NOT imply upgrade capability.
 
