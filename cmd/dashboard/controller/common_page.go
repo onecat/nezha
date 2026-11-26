@@ -7,6 +7,7 @@ import (
 	"strings"
 	"fmt"
 	"net/http"
+	"maps"
 	"strconv"
 	"time"
 
@@ -91,12 +92,20 @@ func (p *commonPage) issueViewPassword(c *gin.Context) {
 
 func (p *commonPage) service(c *gin.Context) {
 	res, _, _ := p.requestGroup.Do("servicePage", func() (interface{}, error) {
-		singleton.AlertsLock.RLock()
-		defer singleton.AlertsLock.RUnlock()
 		stats := make(map[uint64]model.ServiceItemResponse)
 		statsStore := make(map[uint64]model.CycleTransferStats)
 		copier.Copy(&stats, singleton.ServiceSentinelShared.LoadStats())
-		copier.Copy(&statsStore, singleton.AlertsCycleTransferStatsStore)
+		// Do not nest monitor and alert locks; rendering uses detached maps.
+		singleton.AlertsLock.RLock()
+		for id, item := range singleton.AlertsCycleTransferStatsStore {
+			if item == nil { continue }
+			copy := *item
+			copy.ServerName = maps.Clone(item.ServerName)
+			copy.Transfer = maps.Clone(item.Transfer)
+			copy.NextUpdate = maps.Clone(item.NextUpdate)
+			statsStore[id] = copy
+		}
+		singleton.AlertsLock.RUnlock()
 		if stats == nil { stats = make(map[uint64]model.ServiceItemResponse) }
 		if statsStore == nil { statsStore = make(map[uint64]model.CycleTransferStats) }
 		for k, service := range stats {
@@ -175,6 +184,8 @@ func (cp *commonPage) getServerStat(c *gin.Context, withPublicNote bool) ([]byte
 	_, isViewPasswordVerfied := c.Get(model.CtxKeyViewPasswordVerified)
 	authorized := isMember || isViewPasswordVerfied
 	v, err, _ := cp.requestGroup.Do(fmt.Sprintf("serverStats::%t::%t", authorized, withPublicNote), func() (interface{}, error) {
+		singleton.ServerLock.RLock()
+		defer singleton.ServerLock.RUnlock()
 		singleton.SortedServerLock.RLock()
 		defer singleton.SortedServerLock.RUnlock()
 
@@ -186,8 +197,10 @@ func (cp *commonPage) getServerStat(c *gin.Context, withPublicNote bool) ([]byte
 		}
 
 		servers := make([]*model.Server, 0, len(serverList))
-		for _, server := range serverList {
-			if server == nil { continue }
+		for _, entry := range serverList {
+			if entry == nil { continue }
+			server := singleton.ServerList[entry.ID]
+			if server == nil || (!authorized && server.HideForGuest) { continue }
 			item := *server
 			if !withPublicNote {
 				item.PublicNote = ""

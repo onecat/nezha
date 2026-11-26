@@ -167,46 +167,13 @@ func (s *NezhaHandler) ReportSystemInfo(c context.Context, r *pb.Host) (*pb.Rece
 	}
 	host := model.PB2Host(r)
 	singleton.ServerLock.Lock()
-	defer singleton.ServerLock.Unlock()
 	singleton.SortedServerLock.Lock()
-	defer singleton.SortedServerLock.Unlock()
-	if singleton.ServerList[clientID] == nil { return nil, fmt.Errorf("agent no longer exists") }
-
-	// 检查并更新DDNS
-	if singleton.ServerList[clientID].EnableDDNS && host.IP != "" &&
-		(singleton.ServerList[clientID].Host == nil || singleton.ServerList[clientID].Host.IP != host.IP) {
-		ipv4, ipv6, _ := utils.SplitIPAddr(host.IP)
-		providers, err := singleton.GetDDNSProvidersFromProfiles(singleton.ServerList[clientID].DDNSProfiles, &ddns.IP{Ipv4Addr: ipv4, Ipv6Addr: ipv6})
-		if err == nil {
-			for _, provider := range providers {
-				go func(provider *ddns.Provider) {
-					provider.UpdateDomain(context.Background())
-				}(provider)
-			}
-		} else {
-			log.Printf("NEZHA>> 获取DDNS配置时发生错误: %v", err)
-		}
+	if singleton.ServerList[clientID] == nil {
+		singleton.SortedServerLock.Unlock()
+		singleton.ServerLock.Unlock()
+		return nil, fmt.Errorf("agent no longer exists")
 	}
-
-	// 发送IP变动通知
-	if singleton.ServerList[clientID].Host != nil && singleton.Conf.EnableIPChangeNotification &&
-		((singleton.Conf.Cover == model.ConfigCoverAll && !singleton.Conf.IgnoredIPNotificationServerIDs[clientID]) ||
-			(singleton.Conf.Cover == model.ConfigCoverIgnoreAll && singleton.Conf.IgnoredIPNotificationServerIDs[clientID])) &&
-		singleton.ServerList[clientID].Host.IP != "" &&
-		host.IP != "" &&
-		singleton.ServerList[clientID].Host.IP != host.IP {
-
-		singleton.SendNotification(singleton.Conf.IPChangeNotificationTag,
-			fmt.Sprintf(
-				"[%s] %s, %s => %s",
-				singleton.Localizer.MustLocalize(&i18n.LocalizeConfig{
-					MessageID: "IPChanged",
-				}),
-				singleton.ServerList[clientID].Name, singleton.IPDesensitize(singleton.ServerList[clientID].Host.IP),
-				singleton.IPDesensitize(host.IP),
-			),
-			nil)
-	}
+	old := *singleton.ServerList[clientID]
 
 	/**
 	 * 这里的 singleton 中的数据都是关机前的旧数据
@@ -224,6 +191,45 @@ func (s *NezhaHandler) ReportSystemInfo(c context.Context, r *pb.Host) (*pb.Rece
 	}
 
 	singleton.ServerList[clientID].Host = &host
+	singleton.SortedServerLock.Unlock()
+	singleton.ServerLock.Unlock()
+
+	// 检查并更新DDNS
+	if old.EnableDDNS && host.IP != "" &&
+		(old.Host == nil || old.Host.IP != host.IP) {
+		ipv4, ipv6, _ := utils.SplitIPAddr(host.IP)
+		providers, err := singleton.GetDDNSProvidersFromProfiles(old.DDNSProfiles, &ddns.IP{Ipv4Addr: ipv4, Ipv6Addr: ipv6})
+		if err == nil {
+			for _, provider := range providers {
+				go func(provider *ddns.Provider) {
+					provider.UpdateDomain(context.Background())
+				}(provider)
+			}
+		} else {
+			log.Printf("NEZHA>> 获取DDNS配置时发生错误: %v", err)
+		}
+	}
+
+	// 发送IP变动通知
+	if old.Host != nil && singleton.Conf.EnableIPChangeNotification &&
+		((singleton.Conf.Cover == model.ConfigCoverAll && !singleton.Conf.IgnoredIPNotificationServerIDs[clientID]) ||
+			(singleton.Conf.Cover == model.ConfigCoverIgnoreAll && singleton.Conf.IgnoredIPNotificationServerIDs[clientID])) &&
+		old.Host.IP != "" &&
+		host.IP != "" &&
+		old.Host.IP != host.IP {
+
+		singleton.SendNotification(singleton.Conf.IPChangeNotificationTag,
+			fmt.Sprintf(
+				"[%s] %s, %s => %s",
+				singleton.Localizer.MustLocalize(&i18n.LocalizeConfig{
+					MessageID: "IPChanged",
+				}),
+				old.Name, singleton.IPDesensitize(old.Host.IP),
+				singleton.IPDesensitize(host.IP),
+			),
+			nil)
+	}
+
 	return &pb.Receipt{Proced: true}, nil
 }
 

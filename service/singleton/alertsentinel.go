@@ -134,10 +134,12 @@ func OnDeleteAlert(id uint64) {
 
 // checkStatus 检查报警规则并发送报警
 func checkStatus() {
-	AlertsLock.RLock()
-	defer AlertsLock.RUnlock()
+	// Match the order used by server deletion. Alert history and transfer
+	// maps are mutated below, so an exclusive alert lock is required.
 	ServerLock.RLock()
 	defer ServerLock.RUnlock()
+	AlertsLock.Lock()
+	defer AlertsLock.Unlock()
 
 	for _, alert := range Alerts {
 		// 跳过未启用
@@ -145,6 +147,7 @@ func checkStatus() {
 			continue
 		}
 		for _, server := range ServerList {
+			if server == nil || server.Host == nil || server.State == nil { continue }
 			// 监测点
 			alertsStore[alert.ID][server.ID] = append(alertsStore[alert.
 				ID][server.ID], alert.Snapshot(AlertsCycleTransferStatsStore[alert.ID], server, DB))
@@ -185,5 +188,19 @@ func checkStatus() {
 				alertsStore[alert.ID][server.ID] = alertsStore[alert.ID][server.ID][len(alertsStore[alert.ID][server.ID])-max:]
 			}
 		}
+	}
+}
+
+// DeleteServerAlertState is called with ServerLock held by server deletion.
+func DeleteServerAlertState(id uint64) {
+	AlertsLock.Lock()
+	defer AlertsLock.Unlock()
+	for _, history := range alertsStore { delete(history,id) }
+	for _, states := range alertsPrevState { delete(states,id) }
+	for _, stats := range AlertsCycleTransferStatsStore {
+		if stats == nil { continue }
+		delete(stats.ServerName,id)
+		delete(stats.Transfer,id)
+		delete(stats.NextUpdate,id)
 	}
 }

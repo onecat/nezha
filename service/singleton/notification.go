@@ -143,11 +143,15 @@ func SendNotification(notificationTag string, desc string, muteLabel *string, ex
 	}
 	// 向该通知方式组的所有通知方式发出通知
 	notificationsLock.RLock()
-	defer notificationsLock.RUnlock()
+	snapshot := make([]*model.Notification,0,len(NotificationList[notificationTag]))
 	for _, n := range NotificationList[notificationTag] {
+		if n != nil { copy := *n; snapshot = append(snapshot,&copy) }
+	}
+	notificationsLock.RUnlock()
+	for _, n := range snapshot {
 		log.Println("NEZHA>> 尝试通知", n.Name)
 	}
-	for _, n := range NotificationList[notificationTag] {
+	for _, n := range snapshot {
 		ns := model.NotificationServerBundle{
 			Notification: n,
 			Server:       nil,

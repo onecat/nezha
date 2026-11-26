@@ -1,7 +1,7 @@
-name: Nezha v0.30.05 - Development CI
+name: Nezha v0.30.05 - Verified Build
 on:
   push:
-    branches: [security-v0.30.05]
+    branches: [security-v0.30.05, v0.20.13-local-auth]
   workflow_dispatch:
 permissions:
   contents: read
@@ -12,7 +12,7 @@ jobs:
 
 
   verify:
-    if: github.ref_name == 'security-v0.30.05'
+    if: github.ref_name == 'security-v0.30.05' || github.ref_name == 'v0.20.13-local-auth'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -41,19 +41,21 @@ jobs:
         run: go vet ./...
       - name: Race detector
         run: go test -race ./...
-      - name: Build development binary
+      - name: Build verified binary
+        env:
+          RELEASE_VERSION: ${{ github.ref_name == 'v0.20.13-local-auth' && 'v0.30.05' || 'v0.30.05-dev' }}
         run: |
           mkdir -p dist
-          go build -trimpath -ldflags='-s -w -X github.com/naiba/nezha/service/singleton.Version=v0.30.05-dev' -o dist/nezha-app ./cmd/dashboard
-          test "$(dist/nezha-app -v)" = 'v0.30.05-dev'
+          go build -trimpath -ldflags="-s -w -X github.com/naiba/nezha/service/singleton.Version=$RELEASE_VERSION" -o dist/nezha-app ./cmd/dashboard
+          test "$(dist/nezha-app -v)" = "$RELEASE_VERSION"
           (cd dist && sha256sum nezha-app > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
-          name: nezha-v0.30.05-dev
+          name: nezha-verified-linux-amd64
           path: dist/
           if-no-files-found: error
   vulnerability-scan:
-    if: github.ref_name == 'security-v0.30.05'
+    if: github.ref_name == 'security-v0.30.05' || github.ref_name == 'v0.20.13-local-auth'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -79,7 +81,7 @@ jobs:
           path: govulncheck.txt
           if-no-files-found: warn
   frontend-audit:
-    if: github.ref_name == 'security-v0.30.05'
+    if: github.ref_name == 'security-v0.30.05' || github.ref_name == 'v0.20.13-local-auth'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -111,7 +113,7 @@ jobs:
           if-no-files-found: warn
   browser-smoke:
     needs: verify
-    if: github.ref_name == 'security-v0.30.05'
+    if: github.ref_name == 'security-v0.30.05' || github.ref_name == 'v0.20.13-local-auth'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -120,7 +122,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: nezha-v0.30.05-dev
+          name: nezha-verified-linux-amd64
           path: dist
       - uses: actions/setup-node@v4
         with:
@@ -171,3 +173,27 @@ jobs:
             browser-smoke.json
             stability-smoke.json
           if-no-files-found: warn
+  release:
+    if: github.ref_name == 'v0.20.13-local-auth' && github.event_name == 'push'
+    needs: [verify, vulnerability-scan, frontend-audit, browser-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: nezha-verified-linux-amd64
+          path: dist
+      - name: Publish exact verified binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          chmod +x dist/nezha-app
+          test "$(dist/nezha-app -v)" = v0.30.05
+          (cd dist && sha256sum -c SHA256SUMS)
+          gh release create v0.30.05 dist/nezha-app dist/SHA256SUMS --target "$GITHUB_SHA" --title "Nezha v0.30.05" --notes-file RELEASE_V03005.md --latest

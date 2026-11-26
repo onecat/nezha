@@ -231,8 +231,8 @@ func (ma *memberAPI) delete(c *gin.Context) {
 	case "cron":
 		err = singleton.DB.Unscoped().Delete(&model.Cron{}, "id = ?", id).Error
 		if err == nil {
-			singleton.CronLock.RLock()
-			defer singleton.CronLock.RUnlock()
+			singleton.CronLock.Lock()
+			defer singleton.CronLock.Unlock()
 			cr := singleton.Crons[id]
 			if cr != nil && cr.CronJobID != 0 {
 				singleton.Cron.Remove(cr.CronJobID)
@@ -1088,9 +1088,12 @@ func (ma *memberAPI) batchDeleteServer(c *gin.Context) {
 }
 
 func onServerDelete(id uint64) {
-	tag := singleton.ServerList[id].Tag
-	delete(singleton.SecretToID, singleton.ServerList[id].Secret)
+	server := singleton.ServerList[id]
+	if server == nil { return }
+	tag := server.Tag
+	delete(singleton.SecretToID, server.Secret)
 	delete(singleton.ServerList, id)
+	if server.TaskClose != nil { close(server.TaskClose) }
 	index := -1
 	for i := 0; i < len(singleton.ServerTagToIDList[tag]); i++ {
 		if singleton.ServerTagToIDList[tag][i] == id {
@@ -1106,15 +1109,7 @@ func onServerDelete(id uint64) {
 		}
 	}
 
-	singleton.AlertsLock.Lock()
-	for i := 0; i < len(singleton.Alerts); i++ {
-		if singleton.AlertsCycleTransferStatsStore[singleton.Alerts[i].ID] != nil {
-			delete(singleton.AlertsCycleTransferStatsStore[singleton.Alerts[i].ID].ServerName, id)
-			delete(singleton.AlertsCycleTransferStatsStore[singleton.Alerts[i].ID].Transfer, id)
-			delete(singleton.AlertsCycleTransferStatsStore[singleton.Alerts[i].ID].NextUpdate, id)
-		}
-	}
-	singleton.AlertsLock.Unlock()
+	singleton.DeleteServerAlertState(id)
 
 	singleton.DB.Unscoped().Delete(&model.Transfer{}, "server_id = ?", id)
 }
