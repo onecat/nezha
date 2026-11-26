@@ -95,7 +95,10 @@ jobs:
           node --check resource/static/vendor/bootstrap-3.4.1/dist/js/bootstrap-server-status.js
           node --check resource/static/vendor/vue-2.7.16/dist/vue.min.js
       - name: Audit exact embedded npm package versions
-        run: python3 script/audit-frontend.py
+        run: |
+          # Preserve the raw non-zero audit outcome; classify only reviewed advisories.
+          python3 script/audit-frontend.py || test -s frontend-audit.json
+          python3 script/check-frontend-disposition.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -103,6 +106,7 @@ jobs:
           path: |
             .frontend-packages.json
             frontend-audit.json
+            frontend-disposition.json
           include-hidden-files: true
           if-no-files-found: warn
   browser-smoke:
