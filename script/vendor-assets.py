@@ -138,6 +138,16 @@ for file in sorted((RESOURCE / "template").rglob("*.html")):
         raise RuntimeError(f"External runtime dependency remains in {file}")
     file.write_text(s, encoding="utf-8")
 
+# CSS distributions can import fonts even when every HTML asset is local.
+# Remove the remote Google Fonts imports and retain the CSS fallback fonts.
+for file in sorted((RESOURCE / "static").rglob("*.css")):
+    css = file.read_text(encoding="utf-8")
+    cleaned = re.sub(r"""@import\s+(?:url\(\s*)?['"]?(?:https?:)?//fonts\.googleapis\.com/[^'")\s;]+['"]?\s*\)?[^;]*;""", "", css, flags=re.I)
+    if cleaned != css:
+        file.write_text(cleaned, encoding="utf-8")
+    if re.search(r"(?:https?:)?//fonts\.googleapis\.com/", cleaned, re.I):
+        raise RuntimeError("Remote Google Fonts reference remains in " + str(file))
+
 inventory = []
 for (name, version), (base, dest) in sorted(PACKAGES.items()):
     metadata = json.loads((base / "package.json").read_text(encoding="utf-8"))

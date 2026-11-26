@@ -18,7 +18,8 @@ const results = [];
       });
       await ctx.addCookies([{name:'preferred_theme',value:theme,url:base}]);
       const page = await ctx.newPage();
-      page.on('pageerror', error => errors.push(String(error)));
+      page.on('pageerror', error => errors.push(error.stack || String(error)));
+      page.on('console', msg => { if (msg.type()==='error' && !msg.text().includes('net::ERR_BLOCKED_BY_CLIENT')) errors.push(msg.text()); });
       page.on('response', response => {
         if (response.status() >= 400) errors.push(response.status()+' '+new URL(response.url()).pathname);
       });
@@ -26,7 +27,7 @@ const results = [];
         for (const path of ['/','/service']) {
           const response=await page.goto(base+path,{waitUntil:'load',timeout:20000});
           if (!response || response.status() !== 200) throw Error('unexpected status '+path);
-          await page.waitForTimeout(500);
+          await page.waitForTimeout(path==='/' ? 2500 : 500);
         }
       } catch(error) { errors.push(String(error)); }
       results.push({theme,errors,external});
@@ -39,7 +40,8 @@ const results = [];
       if (new URL(route.request().url()).origin!==base) { external.push(route.request().url()); return route.abort(); }
       return route.continue();
     });
-    page.on('pageerror', e=>errors.push(String(e)));
+    page.on('pageerror', e=>errors.push(e.stack || String(e)));
+    page.on('response', response => { if(response.status()>=400) errors.push(response.status()+' '+new URL(response.url()).pathname); });
     try {
       await page.goto(base+'/login');
       await page.locator('input[name=username]').fill('smoke');

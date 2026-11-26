@@ -83,12 +83,14 @@ func (p *commonPage) service(c *gin.Context) {
 	res, _, _ := p.requestGroup.Do("servicePage", func() (interface{}, error) {
 		singleton.AlertsLock.RLock()
 		defer singleton.AlertsLock.RUnlock()
-		var stats map[uint64]model.ServiceItemResponse
-		var statsStore map[uint64]model.CycleTransferStats
+		stats := make(map[uint64]model.ServiceItemResponse)
+		statsStore := make(map[uint64]model.CycleTransferStats)
 		copier.Copy(&stats, singleton.ServiceSentinelShared.LoadStats())
 		copier.Copy(&statsStore, singleton.AlertsCycleTransferStatsStore)
+		if stats == nil { stats = make(map[uint64]model.ServiceItemResponse) }
+		if statsStore == nil { statsStore = make(map[uint64]model.CycleTransferStats) }
 		for k, service := range stats {
-			if !service.Monitor.EnableShowInService {
+			if service.Monitor == nil || !service.Monitor.EnableShowInService {
 				delete(stats, k)
 			}
 		}
@@ -197,6 +199,7 @@ func (cp *commonPage) network(c *gin.Context) {
 			}
 		}
 	}
+	if servers == nil { servers = make([]*model.Server, 0) }
 	serversBytes, _ := utils.Json.Marshal(Data{
 		Now:     time.Now().Unix() * 1000,
 		Servers: servers,
@@ -213,7 +216,7 @@ func (cp *commonPage) getServerStat(c *gin.Context, withPublicNote bool) ([]byte
 	_, isMember := c.Get(model.CtxKeyAuthorizedUser)
 	_, isViewPasswordVerfied := c.Get(model.CtxKeyViewPasswordVerified)
 	authorized := isMember || isViewPasswordVerfied
-	v, err, _ := cp.requestGroup.Do(fmt.Sprintf("serverStats::%t", authorized), func() (interface{}, error) {
+	v, err, _ := cp.requestGroup.Do(fmt.Sprintf("serverStats::%t::%t", authorized, withPublicNote), func() (interface{}, error) {
 		singleton.SortedServerLock.RLock()
 		defer singleton.SortedServerLock.RUnlock()
 
@@ -224,8 +227,9 @@ func (cp *commonPage) getServerStat(c *gin.Context, withPublicNote bool) ([]byte
 			serverList = singleton.SortedServerListForGuest
 		}
 
-		var servers []*model.Server
+		servers := make([]*model.Server, 0, len(serverList))
 		for _, server := range serverList {
+			if server == nil { continue }
 			item := *server
 			if !withPublicNote {
 				item.PublicNote = ""
@@ -238,7 +242,8 @@ func (cp *commonPage) getServerStat(c *gin.Context, withPublicNote bool) ([]byte
 			Servers: servers,
 		})
 	})
-	return v.([]byte), err
+	if err != nil { return nil, err }
+	return v.([]byte), nil
 }
 
 func (cp *commonPage) home(c *gin.Context) {
@@ -267,7 +272,7 @@ var upgrader = websocket.Upgrader{
 
 type Data struct {
 	Now     int64           `json:"now,omitempty"`
-	Servers []*model.Server `json:"servers,omitempty"`
+	Servers []*model.Server `json:"servers"`
 }
 
 var statsWSSlots = make(chan struct{}, 256)
