@@ -82,6 +82,14 @@ const results = [];
       if (new URL(page.url()).pathname!=='/server') throw Error('login failed');
     } catch(e){ errors.push(String(e)); }
     results.push({theme:'dashboard-login',errors,external});
+    if (!errors.length && !external.length) {
+      const agentErrors=[];
+      try {
+        const { runAgentSmoke } = require('./agent-smoke.cjs');
+        await runAgentSmoke(ctx,browser,base);
+      } catch(e) { agentErrors.push(e.stack || String(e)); }
+      results.push({theme:'agent-v0.20.5-integration',errors:agentErrors,external:[]});
+    }
     await ctx.close();
   } finally {
     await browser.close();
