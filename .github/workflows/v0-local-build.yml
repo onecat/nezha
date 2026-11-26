@@ -1,0 +1,48 @@
+name: Nezha V0 Local Auth - Linux AMD64
+
+on:
+  push:
+    branches:
+      - v0.20.13-local-auth
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nezha-v0-local-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test and build Dashboard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v0.20.13-local-auth
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: true
+      - name: Verify local authentication
+        run: go test ./model ./pkg/mygin ./cmd/dashboard/controller
+      - name: Build Linux AMD64
+        env:
+          CGO_ENABLED: "1"
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w" -o dist/nezha-dashboard-linux-amd64 ./cmd/dashboard
+          (cd dist && sha256sum nezha-dashboard-linux-amd64 > SHA256SUMS && zip -q nezha-dashboard-linux-amd64.zip nezha-dashboard-linux-amd64)
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: nezha-v0.20.13-local-auth-linux-amd64
+          path: |
+            dist/nezha-dashboard-linux-amd64.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
