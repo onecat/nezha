@@ -64,7 +64,7 @@ def run():
         try:
             password = secrets.token_hex(18)
             hashed = subprocess.check_output(["htpasswd","-nbBC","5","smoke",password],text=True).strip().split(":",1)[1]
-            write(work/"dashboard.yaml", "httpport: 18008\nhttpbindhost: 127.0.0.1\ngrpcport: 15555\ngrpcbindhost: 127.0.0.1\nlanguage: en-US\nlocalauth:\n  username: smoke\n  passwordhash: "+json.dumps(hashed)+"\n")
+            write(work/"dashboard.yaml", "httpport: 18008\nhttpbindhost: 127.0.0.1\ngrpcport: 15555\ngrpcbindhost: 127.0.0.1\ntls: true\nlanguage: en-US\nlocalauth:\n  username: smoke\n  passwordhash: "+json.dumps(hashed)+"\n")
             subprocess.run(["openssl","req","-x509","-newkey","rsa:2048","-nodes","-days","1","-subj","/CN=127.0.0.1","-addext","subjectAltName=IP:127.0.0.1","-keyout",str(work/"tls.key"),"-out",str(work/"tls.pem")],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             subprocess.run(["openssl","genpkey","-algorithm","Ed25519","-out",str(work/"sign.pem")],check=True)
             (work/"sign.pem").chmod(0o600)
