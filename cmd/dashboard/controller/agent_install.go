@@ -10,7 +10,7 @@ import(
 // Set only by the release pipeline after verifying the exact independent
 // Agent tag, binary and published checksum. Development builds fail closed.
 var agentInstallSHA256 string
-const agentInstallURL="https://github.com/onecat/nezha-agent/releases/download/v0.30.03/nezha-agent"
+const agentInstallURL="https://github.com/onecat/nezha-agent/releases/download/v0.30.04/nezha-agent"
 
 func agentInstallerDigest()string{
  b,err:=hex.DecodeString(agentInstallSHA256)

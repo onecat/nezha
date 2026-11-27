@@ -1,0 +1,5 @@
+# Dashboard v0.30.11
+
+Fix the Agent installer release selection for old Linux hosts with GLIBC_2.32/GLIBC_2.34 errors. The dashboard now embeds the checksum of the independently published static Agent v0.30.04 (Linux amd64, CGO_ENABLED=0, GOAMD64=v1). The joint build verifies the exact Agent tag and checksum, rejects an ELF interpreter or shared libraries, and executes the downloaded binary in a libc-free chroot before enabling its install command. The Dashboard's own build and SQLite CGO requirements are unchanged.
+
+The native systemd install/reinstall, legacy backup, signed URL upgrade, exact previously released v0.30.03 to v0.30.04 direct self-upgrade, and failed-exec rollback remain mandatory before Dashboard release. No Python3 or standalone shell installer on target hosts. No separate Supervisor release. Existing managed installations require explicit migration. No production deployment performed; older systemd/kernel and certificate-store compatibility are not guaranteed by a libc-free execution test.

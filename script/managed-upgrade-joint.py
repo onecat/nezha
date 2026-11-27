@@ -198,10 +198,10 @@ http {
                     row=getjson("/api/v1/server/details?id="+str(sid))["result"][0]
                     return (row.get("host") or {}).get("Version")==v and bool(row.get("status"))
                 wait("URL enrolled Agent reports",lambda:reports("v0.30.00"),120)
-                url="https://github.com/onecat/nezha-agent/releases/download/v0.30.03/nezha-agent"
+                url="https://github.com/onecat/nezha-agent/releases/download/v0.30.04/nezha-agent"
                 request("/api/managed-upgrade/url",{"servers":[sid],"url":url},origin="https://invalid.example",expected=403)
                 task=getjson("/api/managed-upgrade/url",data={"servers":[sid],"url":url})["tasks"][0]["Task"]["ID"]
-                wait("URL actual binary upgrade",lambda:getjson("/api/managed-upgrade/status/"+task)["Task"]["State"]=="succeeded" and reports("v0.30.03"),180)
+                wait("URL actual binary upgrade",lambda:getjson("/api/managed-upgrade/status/"+task)["Task"]["State"]=="succeeded" and reports("v0.30.04"),180)
                 stop(dashboard)
                 dashboard=start("url-reopened",args,env)
                 client=browser()
@@ -232,7 +232,7 @@ http {
                     if not re.fullmatch(r"[0-9a-f]{64}",digest):
                         raise RuntimeError("installer button digest missing or invalid")
                     tokens=shlex.split(command[:-1]) if command.endswith(")") else []
-                    url="https://github.com/onecat/nezha-agent/releases/download/v0.30.03/nezha-agent"
+                    url="https://github.com/onecat/nezha-agent/releases/download/v0.30.04/nezha-agent"
                     if digest not in tokens or url not in tokens or "service" not in tokens or "install" not in tokens:
                         raise RuntimeError("clipboard command missing verified binary install")
                     if install_secret not in tokens or "127.0.0.1:15443" not in tokens:
@@ -281,7 +281,7 @@ http {
                         copied_install()
                         def installed_report():
                             row=getjson("/api/v1/server/details?id="+str(install_sid))["result"][0]
-                            return (row.get("host") or {}).get("Version")=="v0.30.03" and bool(row.get("status"))
+                            return (row.get("host") or {}).get("Version")=="v0.30.04" and bool(row.get("status"))
                         wait("Installed service accepted reports",installed_report,90)
                         sudo("systemctl","is-enabled","--quiet","nezha-agent.service",check=True)
                         sudo("systemctl","is-active","--quiet","nezha-agent.service",check=True)
@@ -321,27 +321,26 @@ http {
                             raise RuntimeError("reinstall changed Agent configuration or pinned identity")
                         def fresh_reinstall_report():
                             row=getjson("/api/v1/server/details?id="+str(install_sid))["result"][0]
-                            return (row.get("host") or {}).get("Version")=="v0.30.03" and bool(row.get("status")) and row.get("last_active",0)>before_report
+                            return (row.get("host") or {}).get("Version")=="v0.30.04" and bool(row.get("status")) and row.get("last_active",0)>before_report
                         wait("Reinstalled service accepted fresh reports",fresh_reinstall_report,90)
                         print("Systemd legacy migration and state-preserving reinstall passed",flush=True)
                         # New single-binary service upgrades without a resident
-                        # supervisor. A development build of this exact source
-                        # labelled .02 is used only as the previous-version fixture.
+                        # supervisor. Use the exact previously published .03 binary.
                         sudo("systemctl","disable","--now","nezha-agent.service",check=True)
                         sudo("rm","-rf","--","/opt/nezha/agent",check=True)
                         sudo("rm","-f","/etc/systemd/system/nezha-agent.service",check=True)
                         sudo("systemctl","daemon-reload",check=True)
                         direct_sid,direct_secret=targets[2]
                         bootstrap=work/"direct-agent-old"
-                        shutil.copyfile(BIN/"agent-v0.30.02",bootstrap)
+                        shutil.copyfile(BIN/"agent-v0.30.03-release",bootstrap)
                         bootstrap.chmod(0o700)
                         sudo(bootstrap,"service","install","--server","127.0.0.1:15443","--ca-file",work/"tls.pem",input=direct_secret+"\n",text=True,timeout=180,check=True)
                         def direct_reports(v):
                             row=getjson("/api/v1/server/details?id="+str(direct_sid))["result"][0]
                             return (row.get("host") or {}).get("Version")==v and bool(row.get("status"))
-                        wait("Direct old Agent reports",lambda:direct_reports("v0.30.02"),90)
+                        wait("Direct old Agent reports",lambda:direct_reports("v0.30.03"),90)
                         tid=getjson("/api/managed-upgrade/url",data={"servers":[direct_sid],"url":url})["tasks"][0]["Task"]["ID"]
-                        wait("Direct actual release self-upgrade",lambda:getjson("/api/managed-upgrade/status/"+tid)["Task"]["State"]=="succeeded" and direct_reports("v0.30.03"),180)
+                        wait("Direct actual release self-upgrade",lambda:getjson("/api/managed-upgrade/status/"+tid)["Task"]["State"]=="succeeded" and direct_reports("v0.30.04"),180)
                         direct_ledger=lambda:json.loads(sudo("cat",ledger_path,check=True,stdout=subprocess.PIPE).stdout)
                         wait("Direct successful receipt persisted",lambda:direct_ledger()["result_reported"],30)
                         seq=direct_ledger()["highest_sequence"]+1
@@ -357,11 +356,11 @@ http {
                         bad=work/"not-executable"
                         bad.write_bytes(b"invalid ELF candidate")
                         package_path=work/"direct-bad.nzu"
-                        subprocess.run([str(BIN/"agent-package"),"-binary",str(bad),"-out",str(package_path),"-key",str(local_key),"-version","v0.30.04","-min-version","v0.30.03","-os","linux","-arch","amd64","-key-id","dashboard-local","-sequence",str(seq)],check=True)
+                        subprocess.run([str(BIN/"agent-package"),"-binary",str(bad),"-out",str(package_path),"-key",str(local_key),"-version","v0.30.05","-min-version","v0.30.04","-os","linux","-arch","amd64","-key-id","dashboard-local","-sequence",str(seq)],check=True)
                         data=package_path.read_bytes()
                         imported=getjson("/api/managed-upgrade/package",data=data,kind="application/octet-stream")
                         bad_id=getjson("/api/managed-upgrade/wave",data={"servers":[direct_sid],"digest":imported["PackageSHA256"],"canary":""})["tasks"][0]["Task"]["ID"]
-                        wait("Unexecutable candidate automatically rolled back",lambda:getjson("/api/managed-upgrade/status/"+bad_id)["Task"]["State"]=="rolled_back" and direct_reports("v0.30.03"),180)
+                        wait("Unexecutable candidate automatically rolled back",lambda:getjson("/api/managed-upgrade/status/"+bad_id)["Task"]["State"]=="rolled_back" and direct_reports("v0.30.04"),180)
                         if sudo("sha256sum","/opt/nezha/agent/nezha-agent",check=True,stdout=subprocess.PIPE,text=True).stdout.split()[0]!=binary_digest:
                             raise RuntimeError("direct rollback did not restore exact previous bytes")
                         wait("Direct rollback receipt persisted",lambda:direct_ledger()["result_reported"],30)
