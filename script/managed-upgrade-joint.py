@@ -232,6 +232,18 @@ http {
             rollback=wave(ids[:1],bad)[0]
             wait("Wrong-version signed binary rolls back",lambda:result(rollback,ids[0],"rolled_back","v0.30.01",3))
             request("/api/managed-upgrade/wave",{"servers":ids[:1],"digest":bad,"canary":""},expected=409)
+            # Restart both real services after the rollback and verify that
+            # neither the Dashboard nor the Agent loses the consumed sequence.
+            stop(supervisors[ids[0]])
+            stop(dashboard)
+            dashboard=start("dashboard-reopened",args,env)
+            client=browser()
+            wait("Dashboard reopens durable state",up,60)
+            login()
+            root=dirs[ids[0]]
+            supervisors[ids[0]]=start(f"supervisor-reopened-{ids[0]}",[BIN/"supervisor","--config",root/"supervisor.json"])
+            wait("Restart retains rollback outcome",lambda:result(rollback,ids[0],"rolled_back","v0.30.01",3),120)
+            request("/api/managed-upgrade/wave",{"servers":ids[:1],"digest":bad,"canary":""},expected=409)
             print("Native joint managed upgrade passed: "+ARCH,flush=True)
         except Exception:
             # Report only bounded non-secret diagnostic fields. Never print

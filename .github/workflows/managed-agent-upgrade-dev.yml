@@ -67,13 +67,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: onecat/nezha-agent
-          ref: 1f001fa57ecbd3448766941f3142326cd8c8dace
+          ref: b5f5a231f27a391e5d0c5a85da07b1689ca459e8
           path: joint-agent
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.4'
           cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Vendor exact frontend assets before candidate build
+        run: python3 script/vendor-assets.py
       - name: Install isolated test proxy
         run: |
           sudo apt-get update -qq
@@ -82,15 +87,37 @@ jobs:
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/joint-bin"
-          go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/dashboard" ./cmd/dashboard
+          go build -mod=readonly -trimpath -ldflags="-X github.com/naiba/nezha/service/singleton.Version=v0.30.06-rc" -o "$RUNNER_TEMP/joint-bin/dashboard" ./cmd/dashboard
           go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/agent-package" ./cmd/agent-package
           cd joint-agent
-          go build -mod=mod -o "$RUNNER_TEMP/joint-bin/supervisor" ./cmd/supervisor
+          go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/supervisor" ./cmd/supervisor
           for version in v0.30.00 v0.30.01 v0.30.03; do
-            go build -mod=mod -ldflags="-X main.version=$version" -o "$RUNNER_TEMP/joint-bin/agent-$version" ./cmd/agent
+            go build -mod=readonly -ldflags="-X main.version=$version" -o "$RUNNER_TEMP/joint-bin/agent-$version" ./cmd/agent
           done
       - name: Actual Dashboard and Supervisor over TLS
         run: python3 script/managed-upgrade-joint.py "$RUNNER_TEMP/joint-bin" "$(go env GOARCH)"
+      - name: Stage exact tested candidate binaries (unsigned)
+        run: |
+          set -eu
+          arch=$(go env GOARCH)
+          mkdir -p candidate
+          cp "$RUNNER_TEMP/joint-bin/dashboard" candidate/nezha-dashboard
+          cp "$RUNNER_TEMP/joint-bin/agent-package" candidate/agent-package
+          cp "$RUNNER_TEMP/joint-bin/supervisor" candidate/nezha-supervisor
+          cp "$RUNNER_TEMP/joint-bin/agent-v0.30.00" candidate/nezha-agent-v0.30.00
+          cp "$RUNNER_TEMP/joint-bin/agent-v0.30.01" candidate/nezha-agent-v0.30.01
+          cp joint-agent/deploy/nezha-supervisor.service candidate/
+          cp LICENSE candidate/LICENSE-dashboard
+          cp joint-agent/LICENSE candidate/LICENSE-agent
+          printf 'Dashboard=%s\nAgent=%s\nPlatform=linux/%s\nGo=%s\n' "$GITHUB_SHA" "$(git -C joint-agent rev-parse HEAD)" "$arch" "$(go version)" > candidate/SOURCES.txt
+          (cd candidate && sha256sum * > SHA256SUMS)
+          tar -C candidate -czf "nezha-test-candidate-linux-$arch.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-test-candidate-${{ matrix.os }}
+          path: nezha-test-candidate-linux-*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
 
   security-regression:
     if: github.ref_name == 'agent-upgrade-v0.30.06'
