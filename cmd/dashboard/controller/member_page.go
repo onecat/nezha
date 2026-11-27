@@ -61,6 +61,7 @@ func (mp *memberPage) server(c *gin.Context) {
 		"Servers": singleton.SortedServerList,
  "ManagedUpgradeEnabled":upgradeEnabled,
  "AgentInstallCommands":commands,
+ "AgentInstallerDigest":agentInstallerDigest(),
  "URLUpgradeEnabled":upgradeEnabled&&upgradecontrol.Current.Automatic(),
  "ManagedUpgradeVisible":upgradeVisible,
 	}))

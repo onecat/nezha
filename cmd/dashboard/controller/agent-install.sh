@@ -6,7 +6,7 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 die(){ printf 'Nezha: %s\n' "$*" >&2; exit 1; }
 [[ $EUID == 0 ]] || die "Run this command in a root shell."
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || die "Only Linux amd64 is supported."
-for tool in curl sha256sum python3 systemctl install flock runuser useradd getent; do
+for tool in curl sha256sum python3 systemctl install flock runuser useradd getent stat find id; do
     command -v "$tool" >/dev/null || die "Missing prerequisite: $tool"
 done
 [[ -d /run/systemd/system ]] || die "systemd is required."
@@ -211,8 +211,9 @@ ReadWritePaths=/opt/nezha/agent/managed
 [Install]
 WantedBy=multi-user.target
 UNIT
-install -m 0644 "$tmp/nezha-agent.service" "$unit.new"
-mv -T "$unit.new" "$unit"
+unit_stage=$(mktemp /etc/systemd/system/.nezha-agent.service-XXXXXX)
+install -m 0644 "$tmp/nezha-agent.service" "$unit_stage"
+mv -T "$unit_stage" "$unit"
 systemctl daemon-reload
 systemctl reset-failed "$service" || true
 started=1

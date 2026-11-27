@@ -1,6 +1,7 @@
 """Isolated native integration; no production secrets or deployment."""
 import hashlib
-import html
+from html.parser import HTMLParser
+import shlex
 import http.cookiejar
 import json
 import os
@@ -213,13 +214,40 @@ http {
                 print("URL release, enrollment, upgrade and persisted receipt passed",flush=True)
                 if os.environ.get("NZ_JOINT_INSTALLER")=="1":
                     install_sid,install_secret=targets[1]
-                    installer=request("/agent-install.sh",session=browser())
-                    page=html.unescape(request("/server").decode())
-                    cmds=re.findall(r'data-clipboard-text="([^"]*)"',request("/server").decode())
-                    cmds=[html.unescape(x) for x in cmds]
-                    command=next(x for x in cmds if install_secret in x and "/agent-install.sh" in x)
-                    if hashlib.sha256(installer).hexdigest() not in command or "./nezha-agent -s" in page:
-                        raise RuntimeError("copied installer command does not match embedded installer")
+                    class ClipboardButtons(HTMLParser):
+                        def __init__(self):
+                            super().__init__(convert_charrefs=True)
+                            self.buttons=[]
+                        def handle_starttag(self,tag,attrs):
+                            if tag=="button":
+                                self.buttons.append(dict(attrs))
+                    parser=ClipboardButtons()
+                    parser.feed(request("/server").decode())
+                    matches=[b for b in parser.buttons if b.get("data-agent-install-id")==str(install_sid)]
+                    if len(matches)!=1:
+                        raise RuntimeError("expected exactly one enabled installer button for selected server")
+                    button=matches[0]
+                    command=button.get("data-clipboard-text","")
+                    digest=button.get("data-agent-installer-sha256","")
+                    if not re.fullmatch(r"[0-9a-f]{64}",digest):
+                        raise RuntimeError("installer button digest missing or invalid")
+                    installer=request("/agent-install.sh?sha256="+digest,session=browser())
+                    actual=hashlib.sha256(installer).hexdigest()
+                    if actual!=digest:
+                        raise RuntimeError("served installer digest mismatch: expected "+digest+" actual "+actual)
+                    if not installer.startswith(b"#!/usr/bin/env bash"):
+                        raise RuntimeError("installer response is not a bash script")
+                    tokens=shlex.split(command[:-1]) if command.endswith(")") else []
+                    if digest not in tokens:
+                        raise RuntimeError("clipboard command missing embedded script checksum")
+                    if BASE+"/agent-install.sh?sha256="+digest not in tokens:
+                        raise RuntimeError("clipboard command missing exact version-bound HTTPS script URL")
+                    if install_secret not in tokens or "127.0.0.1:15443" not in tokens:
+                        raise RuntimeError("clipboard command has wrong selected identity or endpoint")
+                    if any(b.get("data-clipboard-text","").startswith("./nezha-agent -s ") for b in parser.buttons):
+                        raise RuntimeError("obsolete Agent clipboard command still present")
+                    request("/agent-install.sh?sha256="+"0"*64,expected=409,session=browser())
+                    print("Clipboard command, selected identity and exact embedded script checksum: passed",flush=True)
                     # Real systemd migration on the disposable native CI runner.
                     if pathlib.Path("/opt/nezha/agent").exists() or pathlib.Path("/etc/systemd/system/nezha-agent.service").exists():
                         raise RuntimeError("installer CI must use a clean host")
@@ -238,8 +266,11 @@ http {
                         bundle=work/"combined-ca.pem"
                         bundle.write_bytes(pathlib.Path("/etc/ssl/certs/ca-certificates.crt").read_bytes()+b"\n"+(work/"tls.pem").read_bytes())
                         def copied_install():
-                            p=sudo("env","CURL_CA_BUNDLE="+str(bundle),"NZ_AGENT_CA_FILE="+str(work/"tls.pem"),"bash","-c",command,timeout=360)
-                            if p.returncode!=0:raise RuntimeError("copied installation command failed")
+                            p=sudo("env","CURL_CA_BUNDLE="+str(bundle),"NZ_AGENT_CA_FILE="+str(work/"tls.pem"),"bash","-s",input=command+"\n",text=True,timeout=360)
+                            if p.returncode!=0:
+                                sudo("systemctl","show","-p","ActiveState","-p","SubState","-p","Result","-p","ExecMainStatus","nezha-agent.service")
+                                sudo("journalctl","-u","nezha-agent.service","-n","25","--no-pager")
+                                raise RuntimeError("copied installation command failed")
                         copied_install()
                         def installed_report():
                             row=getjson("/api/v1/server/details?id="+str(install_sid))["result"][0]
