@@ -14,6 +14,17 @@ import (
 )
 
 var ErrConflict = errors.New("upgrade task revision conflict")
+var ErrCapacity = errors.New("managed Agent upgrade capacity exhausted")
+const MaxActiveTasks = 3
+
+// Admission audit is immutable and stored atomically with its task.
+type admissionRow struct {
+ TaskID string `gorm:"primaryKey;size:128;not null"`
+ OperatorID uint64 `gorm:"not null"`
+ AdmittedAt time.Time `gorm:"not null"`
+ Snapshot []byte `gorm:"not null"`
+}
+func(admissionRow) TableName()string{return "managed_agent_upgrade_admissions"}
 
 // A nullable unique active-server ID reserves a server until an explicit
 // terminal transition. Expiration alone never releases the reservation.
@@ -39,7 +50,7 @@ type Store struct { db *gorm.DB }
 func Open(ctx context.Context, db *gorm.DB) (*Store,error) {
  if db==nil { return nil,errors.New("missing upgrade database") }
  if db.Dialector.Name()!="sqlite" { return nil,errors.New("unsupported upgrade database") }
- if err:=db.WithContext(ctx).AutoMigrate(&taskRow{});err!=nil { return nil,err }
+ if err:=db.WithContext(ctx).AutoMigrate(&taskRow{},&admissionRow{});err!=nil { return nil,err }
  return &Store{db:db},nil
 }
 
@@ -75,13 +86,27 @@ func decode(r taskRow) (Record,error) {
 // Create reserves a server atomically using the unique index. The caller must
 // have independently authorized the operator, target and verified package.
 func (s *Store) Create(ctx context.Context,t core.Transaction,now time.Time)(Record,error) {
- if !validID(t.ID) || t.ServerID>math.MaxInt64 || t.State!=core.StatePending || now.IsZero() || !now.Before(t.ExpiresAt) {
+ return s.create(ctx,t,now,0)
+}
+
+// create reserves global capacity and, for scheduler admission, records the
+// authenticated operator in the same SQLite transaction. Concurrent writers
+// may receive SQLITE_BUSY; never treat a busy error as admission success.
+func(s *Store) create(ctx context.Context,t core.Transaction,now time.Time,operator uint64)(Record,error){
+ if operator>math.MaxInt64 || !validID(t.ID) || t.ServerID>math.MaxInt64 || t.State!=core.StatePending || now.IsZero() || !now.Before(t.ExpiresAt) {
   return Record{},errors.New("invalid initial upgrade task")
  }
  b,err:=core.EncodeSnapshot(t)
  if err!=nil { return Record{},err }
  r:=taskRow{ID:t.ID,ServerID:t.ServerID,ActiveServerID:active(t),Revision:1,Snapshot:b}
- if err:=s.db.WithContext(ctx).Create(&r).Error;err!=nil { return Record{},err }
+ if err:=s.db.WithContext(ctx).Transaction(func(tx *gorm.DB)error{
+  var count int64
+  if err:=tx.Model(&taskRow{}).Where("active_server_id IS NOT NULL").Count(&count).Error;err!=nil{return err}
+  if count>=MaxActiveTasks{return ErrCapacity}
+  if err:=tx.Create(&r).Error;err!=nil{return err}
+  if operator!=0{return tx.Create(&admissionRow{TaskID:t.ID,OperatorID:operator,AdmittedAt:now.UTC(),Snapshot:b}).Error}
+  return nil
+ });err!=nil{return Record{},err}
  return decode(r)
 }
 
