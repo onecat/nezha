@@ -1,0 +1,5 @@
+# Native paired-repository qualification
+
+The development workflow pins Agent source 1f001fa57ecbd3448766941f3142326cd8c8dace and builds the actual Dashboard, offline signer, Linux supervisor and Agent executables on native amd64 and arm64 runners. A disposable Nginx TLS proxy, local admin login, private SQLite database, temporary Ed25519 key and three actual supervisor processes exercise the real production entrypoints. The script verifies disabled-default admission, cross-origin rejection, initial reports, signed canary, a two-target approved wave, wrong-version signed binary rollback, exact installed bytes, durable acknowledged outcomes and replay rejection. No production credentials or official Agent source are used. The deliberately wrong-version executable is a fault-injection fixture, not a separate released version. CI results must be inspected; adding a test is not proof of passing.
+
+The source pin must be updated when Agent changes; this prevents an uncontrolled moving branch from changing qualification results. Only local TLS reverse proxy topology is tested. No production installation or release occurs.
