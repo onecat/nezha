@@ -58,7 +58,7 @@ func ServeWeb(port uint) *http.Server {
 	r.NoMethod(page404)
 
 	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
+		Addr:              singleton.Conf.HTTPListenAddress(port),
 		ReadHeaderTimeout: time.Second * 5,
 		Handler:           r,
 	}

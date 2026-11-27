@@ -1,14 +1,13 @@
-name: Managed Agent upgrade - development checks
+name: Dashboard v0.30.07 - configuration and security checks
 on:
   push:
-    branches: [agent-upgrade-v0.30.06]
+    branches: [config-v0.30.07]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   package-verification:
-    if: >-
-      github.ref_name == 'agent-upgrade-v0.30.06' && github.event.head_commit.message != 'release: remove redundant Dashboard release assets'
+    if: github.ref_name == 'config-v0.30.07'
     strategy:
       fail-fast: false
       matrix:
@@ -28,8 +27,7 @@ jobs:
           go test -race -count=1 -v ./pkg/agentupgrade ./pkg/upgradewire ./cmd/agent-package
           go vet ./pkg/agentupgrade ./pkg/upgradewire ./cmd/agent-package
   dashboard-storage:
-    if: >-
-      github.ref_name == 'agent-upgrade-v0.30.06' && github.event.head_commit.message != 'release: remove redundant Dashboard release assets'
+    if: github.ref_name == 'config-v0.30.07'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -52,8 +50,7 @@ jobs:
           go build ./cmd/dashboard
 
   joint-upgrade:
-    if: >-
-      github.ref_name == 'agent-upgrade-v0.30.06' && github.event.head_commit.message != 'release: remove redundant Dashboard release assets'
+    if: github.ref_name == 'config-v0.30.07'
     strategy:
       fail-fast: false
       matrix:
@@ -90,8 +87,8 @@ jobs:
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/joint-bin"
-          go build -mod=readonly -trimpath -ldflags="-X github.com/naiba/nezha/service/singleton.Version=v0.30.06" -o "$RUNNER_TEMP/joint-bin/dashboard" ./cmd/dashboard
-          test "$("$RUNNER_TEMP/joint-bin/dashboard" -v)" = v0.30.06
+          go build -mod=readonly -trimpath -ldflags="-X github.com/naiba/nezha/service/singleton.Version=v0.30.07" -o "$RUNNER_TEMP/joint-bin/dashboard" ./cmd/dashboard
+          test "$("$RUNNER_TEMP/joint-bin/dashboard" -v)" = v0.30.07
           go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/agent-package" ./cmd/agent-package
           cd joint-agent
           go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/supervisor" ./cmd/supervisor
@@ -106,7 +103,7 @@ jobs:
           set -eu
           mkdir -p dist
           install -m 0755 "$RUNNER_TEMP/joint-bin/dashboard" dist/nezha-app
-          test "$(dist/nezha-app -v)" = v0.30.06
+          test "$(dist/nezha-app -v)" = v0.30.07
           (cd dist && sha256sum nezha-app > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         if: runner.arch == 'X64'
@@ -116,8 +113,7 @@ jobs:
           if-no-files-found: error
 
   security-regression:
-    if: >-
-      github.ref_name == 'agent-upgrade-v0.30.06' && github.event.head_commit.message != 'release: remove redundant Dashboard release assets'
+    if: github.ref_name == 'config-v0.30.07'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -155,7 +151,7 @@ jobs:
 
   release:
     if: >-
-      github.event_name == 'push' && github.ref == 'refs/heads/agent-upgrade-v0.30.06' && github.event.head_commit.message == 'release: qualify and publish Dashboard v0.30.06'
+      github.event_name == 'push' && github.ref == 'refs/heads/config-v0.30.07' && github.event.head_commit.message == 'release: qualify and publish Dashboard v0.30.07'
     needs: [package-verification, dashboard-storage, joint-upgrade, security-regression]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -172,7 +168,7 @@ jobs:
       - name: Verify exact tested Dashboard binary
         run: |
           chmod +x release-dist/nezha-app
-          test "$(release-dist/nezha-app -v)" = v0.30.06
+          test "$(release-dist/nezha-app -v)" = v0.30.07
           (cd release-dist && sha256sum -c SHA256SUMS)
       - name: Confirm matching Agent release and publish Dashboard
         env:
@@ -189,54 +185,8 @@ jobs:
           done
           test "$agent_sha" = "718ff36ee1975e05377cbd2d93e62df2309f9b88"
           test "$agent_tag" = v0.30.00
-          if gh release view v0.30.06 >/dev/null 2>&1; then
+          if gh release view v0.30.07 >/dev/null 2>&1; then
             echo "Release already exists; refusing to overwrite"
             exit 1
           fi
-          gh release create v0.30.06 release-dist/nezha-app release-dist/SHA256SUMS --target "$GITHUB_SHA" --title "Nezha v0.30.06" --notes-file RELEASE_V03006.md --latest
-
-  cleanup-v03006-assets:
-    if: >-
-      github.event_name == 'push' && github.ref == 'refs/heads/agent-upgrade-v0.30.06' && github.event.head_commit.message == 'release: remove redundant Dashboard release assets'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Remove only the three redundant release assets and synchronize checksums
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -eu
-          test "$GH_REPO" = onecat/nezha
-          test "$(gh api repos/onecat/nezha/git/ref/tags/v0.30.06 --jq '.object.sha')" = "b45afc9ed48dcb8e8b966cec69f64a223dae4b56"
-          release=$(gh api repos/onecat/nezha/releases/tags/v0.30.06)
-          test "$(jq -r '.id' <<< "$release")" = 460133455
-          test "$(jq -r '.assets[] | select(.name=="nezha-app") | .id' <<< "$release")" = 798811431
-          test "$(jq -r '.assets[] | select(.name=="nezha-app") | .digest' <<< "$release")" = sha256:7ab18026b71d2daadf5dd9f1f2b2381ab5fe7620c2923234acd93bd5e9cb208b
-          # Refuse to modify any unexpected release asset.
-          for item in "798811424:managed-upgrade-v0.30.06-linux-amd64.tar.gz" "798811422:managed-upgrade-v0.30.06-linux-arm64.tar.gz" "798811425:nezha-app-linux-arm64"; do
-            id=${item%%:*}
-            name=${item#*:}
-            actual=$(jq -r --arg name "$name" '.assets[] | select(.name==$name) | .id' <<< "$release")
-            if [ -n "$actual" ]; then
-              test "$actual" = "$id"
-              gh release delete-asset v0.30.06 "$name" --yes
-            fi
-          done
-          temp=$(mktemp -d)
-          printf '%s  nezha-app\n' 7ab18026b71d2daadf5dd9f1f2b2381ab5fe7620c2923234acd93bd5e9cb208b > "$temp/SHA256SUMS"
-          gh release upload v0.30.06 "$temp/SHA256SUMS" --clobber
-          gh release edit v0.30.06 --notes-file RELEASE_V03006.md
-          gh release download v0.30.06 --pattern SHA256SUMS --dir "$temp/check"
-          cmp "$temp/SHA256SUMS" "$temp/check/SHA256SUMS"
-          actual=$(gh api repos/onecat/nezha/releases/tags/v0.30.06)
-          test "$(jq -r '.assets[].name' <<< "$actual" | sort)" = "$(printf 'SHA256SUMS\nnezha-app\n')"
-          test "$(jq -r '.assets[] | select(.name=="nezha-app") | .id' <<< "$actual")" = 798811431
-          test "$(jq -r '.assets[] | select(.name=="nezha-app") | .digest' <<< "$actual")" = sha256:7ab18026b71d2daadf5dd9f1f2b2381ab5fe7620c2923234acd93bd5e9cb208b
-          test "$(gh api repos/onecat/nezha/git/ref/tags/v0.30.06 --jq '.object.sha')" = "b45afc9ed48dcb8e8b966cec69f64a223dae4b56"
-          echo "Release contains only nezha-app and SHA256SUMS; original binary and tag preserved."
+          gh release create v0.30.07 release-dist/nezha-app release-dist/SHA256SUMS --target "$GITHUB_SHA" --title "Nezha v0.30.07" --notes-file RELEASE_V03007.md --latest

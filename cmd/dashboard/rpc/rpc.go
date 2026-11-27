@@ -20,11 +20,11 @@ func ServeRPC(port uint) {
 	server := grpc.NewServer()
 	rpcService.NezhaHandlerSingleton = rpcService.NewNezhaHandler()
 	pb.RegisterNezhaServiceServer(server, rpcService.NezhaHandlerSingleton)
- endpoint:=fmt.Sprintf(":%d",port)
+ endpoint,err:=singleton.Conf.GRPCListenAddress(port,upgradecontrol.Current!=nil)
+ if err!=nil{panic(err)}
  handler:=&upgrade.RPC{}
  if c:=upgradecontrol.Current;c!=nil{
   // A configured managed upgrade deployment requires local TLS termination.
-  endpoint=fmt.Sprintf("127.0.0.1:%d",port)
   handler=&upgrade.RPC{Scheduler:c.Scheduler,AllowExecution:c.Execution,AllowLoopbackProxy:true,Authenticate:func(ctx context.Context)(uint64,error){
    id,err:=rpcService.NezhaHandlerSingleton.Auth.Check(ctx)
    if err!=nil||!c.AgentAllowed(id){return 0,fmt.Errorf("managed Agent denied")}
@@ -36,7 +36,7 @@ func ServeRPC(port uint) {
 	if err != nil {
 		panic(err)
 	}
-	server.Serve(listen)
+	if err:=server.Serve(listen);err!=nil{panic(err)}
 }
 
 func DispatchTask(serviceSentinelDispatchBus <-chan model.Monitor) {

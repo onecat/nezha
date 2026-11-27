@@ -2,6 +2,7 @@ package singleton
 
 import (
 	"log"
+	"os"
 	"time"
 
 	"github.com/patrickmn/go-cache"
@@ -58,6 +59,7 @@ func InitDBFromPath(path string) {
 	var err error
 	DB, err = gorm.Open(sqlite.Open(path), &gorm.Config{
 		CreateBatchSize: 200,
+		Logger: databaseLogger(log.New(os.Stderr, "", log.LstdFlags)),
 	})
 	if err != nil {
 		panic(err)

@@ -71,21 +71,23 @@ type Config struct {
 	}
 	Oauth2 struct {
 		Type            string
-		Admin           string // 管理员用户名列表
-		AdminGroups     string // 管理员用户组列表
-		ClientID        string
-		ClientSecret    string
-		Endpoint        string
-		OidcDisplayName string // for OIDC Display Name
-		OidcIssuer      string // for OIDC Issuer
-		OidcLogoutURL   string // for OIDC Logout URL
-		OidcRegisterURL string // for OIDC Register URL
-		OidcLoginClaim  string // for OIDC Claim
-		OidcGroupClaim  string // for OIDC Group Claim
-		OidcScopes      string // for OIDC Scopes
-		OidcAutoCreate  bool   // for OIDC Auto Create
-		OidcAutoLogin   bool   // for OIDC Auto Login
+		Admin           string `yaml:"-"` // 管理员用户名列表
+		AdminGroups     string `yaml:"-"` // 管理员用户组列表
+		ClientID        string `yaml:"-"`
+		ClientSecret    string `yaml:"-"`
+		Endpoint        string `yaml:"-"`
+		OidcDisplayName string `yaml:"-"` // for OIDC Display Name
+		OidcIssuer      string `yaml:"-"` // for OIDC Issuer
+		OidcLogoutURL   string `yaml:"-"` // for OIDC Logout URL
+		OidcRegisterURL string `yaml:"-"` // for OIDC Register URL
+		OidcLoginClaim  string `yaml:"-"` // for OIDC Claim
+		OidcGroupClaim  string `yaml:"-"` // for OIDC Group Claim
+		OidcScopes      string `yaml:"-"` // for OIDC Scopes
+		OidcAutoCreate  bool `yaml:"-"`   // for OIDC Auto Create
+		OidcAutoLogin   bool `yaml:"-"`   // for OIDC Auto Login
 	}
+	HTTPBindHost string `koanf:"httpbindhost" yaml:"httpbindhost"`
+	GRPCBindHost string `koanf:"grpcbindhost" yaml:"grpcbindhost"`
 	HTTPPort      uint
 	GRPCPort      uint
 	GRPCHost      string
@@ -174,6 +176,7 @@ func (c *Config) Read(path string) error {
 	if c.GRPCPort == 0 {
 		c.GRPCPort = 5555
 	}
+	if err := c.ValidateListeners(); err != nil { return err }
 	if c.EnableIPChangeNotification && c.IPChangeNotificationTag == "" {
 		c.IPChangeNotificationTag = "default"
 	}

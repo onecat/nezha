@@ -68,6 +68,7 @@ func main() {
  cancelUpgrade()
  if upgradeErr!=nil{log.Print("managed Agent upgrades disabled: invalid provisioning")}else{upgradecontrol.Current=control}
 
+ if _,err:=singleton.Conf.GRPCListenAddress(singleton.Conf.GRPCPort,control!=nil);err!=nil{log.Fatal(err)}
 	// TODO 使用 cmux 在同一端口服务 HTTP 和 gRPC
 	singleton.CleanMonitorHistory()
 	go rpc.ServeRPC(singleton.Conf.GRPCPort)
