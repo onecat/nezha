@@ -7,6 +7,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/naiba/nezha/model"
+ upgrade "github.com/naiba/nezha/service/agentupgrade"
+ wire "github.com/naiba/nezha/pkg/upgradewire"
 	pb "github.com/naiba/nezha/proto"
 	rpcService "github.com/naiba/nezha/service/rpc"
 	"github.com/naiba/nezha/service/singleton"
@@ -16,6 +18,8 @@ func ServeRPC(port uint) {
 	server := grpc.NewServer()
 	rpcService.NezhaHandlerSingleton = rpcService.NewNezhaHandler()
 	pb.RegisterNezhaServiceServer(server, rpcService.NezhaHandlerSingleton)
+ // Fail closed until explicit production scheduler provisioning exists.
+ wire.Register(server,&upgrade.RPC{})
 	listen, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		panic(err)

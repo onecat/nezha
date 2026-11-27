@@ -50,7 +50,7 @@ type Store struct { db *gorm.DB }
 func Open(ctx context.Context, db *gorm.DB) (*Store,error) {
  if db==nil { return nil,errors.New("missing upgrade database") }
  if db.Dialector.Name()!="sqlite" { return nil,errors.New("unsupported upgrade database") }
- if err:=db.WithContext(ctx).AutoMigrate(&taskRow{},&admissionRow{});err!=nil { return nil,err }
+ if err:=db.WithContext(ctx).AutoMigrate(&taskRow{},&admissionRow{},&deliveryRow{});err!=nil { return nil,err }
  return &Store{db:db},nil
 }
 
