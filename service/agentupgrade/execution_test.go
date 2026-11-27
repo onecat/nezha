@@ -23,7 +23,8 @@ func TestGrantAndTerminalReceipt(t *testing.T){
    if err!=nil{t.Fatal(err)}
    if err:=store.ackVerified(ctx,verified,time.Now());err!=nil{t.Fatal(err)}
    result:=verified;result.State=terminal
-   if err:=store.recordResult(ctx,result,time.Now());err==nil{t.Fatal("result before grant accepted")}
+   premature:=result;premature.State=core.StateSucceeded
+   if err:=store.recordResult(ctx,premature,time.Now());err==nil{t.Fatal("success before grant accepted")}
    e.policy.OperatorCanUpgrade=false
    if err:=s.grant(ctx,verified);err==nil{t.Fatal("revoked grant accepted")}
    e.policy.OperatorCanUpgrade=true

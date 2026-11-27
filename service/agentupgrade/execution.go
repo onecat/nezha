@@ -3,6 +3,7 @@ package agentupgrade
 import (
  "context"
  "errors"
+ "math"
  "time"
 
  core "github.com/naiba/nezha/pkg/agentupgrade"
@@ -56,7 +57,10 @@ func(s *Store) recordResult(ctx context.Context,t core.Transaction,now time.Time
  if err!=nil{return err}
  if !r.Task.SameIdentity(t)||!r.Task.ExpiresAt.Equal(t.ExpiresAt){return ErrConflict}
  var exec executionRow
- if err:=s.db.WithContext(ctx).First(&exec,"task_id = ?",t.ID).Error;err!=nil{return err}
+ if err:=s.db.WithContext(ctx).First(&exec,"task_id = ?",t.ID).Error;err!=nil{
+  if errors.Is(err,gorm.ErrRecordNotFound)&&t.State==core.StateFailed{return s.recordAbortedReservation(ctx,r,t,now)}
+  return err
+ }
  grant,err:=core.DecodeSnapshot(exec.Grant)
  if err!=nil||grant.State!=core.StateInstalling||!grant.SameIdentity(t)||!grant.ExpiresAt.Equal(t.ExpiresAt)||exec.GrantedAt.IsZero(){return errors.New("invalid execution grant")}
  b,err:=core.EncodeSnapshot(t)
@@ -65,7 +69,7 @@ func(s *Store) recordResult(ctx context.Context,t core.Transaction,now time.Time
   if string(exec.Result)==string(b)&&r.Task.State==t.State&&exec.ResultAt!=nil{return nil}
   return ErrConflict
  }
- if r.Task.State!=core.StateInstalling{return ErrConflict}
+ if r.Task.State!=core.StateInstalling||r.Revision==math.MaxInt64{return ErrConflict}
  // Successful results must arrive before expiry. Late failures/rollbacks
  // remain reportable; an expired success requires operator reconciliation.
  switch t.State{
@@ -90,7 +94,6 @@ func(s *Store) recordResult(ctx context.Context,t core.Transaction,now time.Time
 func(r *RPC) executionTask(ctx context.Context,req *wrapperspb.BytesValue)(core.Transaction,error){
  id,err:=r.identity(ctx)
  if err!=nil{return core.Transaction{},err}
- if !r.AllowExecution{return core.Transaction{},status.Error(codes.Unavailable,"installation disabled")}
  if req==nil{return core.Transaction{},status.Error(codes.InvalidArgument,"missing task")}
  t,err:=core.DecodeSnapshot(req.Value)
  if err!=nil||t.ServerID!=id{return core.Transaction{},status.Error(codes.PermissionDenied,"invalid task identity")}
@@ -99,6 +102,7 @@ func(r *RPC) executionTask(ctx context.Context,req *wrapperspb.BytesValue)(core.
 func(r *RPC) Grant(ctx context.Context,req *wrapperspb.BytesValue)(*wrapperspb.BytesValue,error){
  t,err:=r.executionTask(ctx,req)
  if err!=nil{return nil,err}
+ if !r.AllowExecution{return nil,status.Error(codes.Unavailable,"installation disabled")}
  if err:=r.Scheduler.grant(ctx,t);err!=nil{return nil,status.Error(codes.FailedPrecondition,"installation grant refused")}
  return wrapperspb.Bytes([]byte("installing")),nil
 }

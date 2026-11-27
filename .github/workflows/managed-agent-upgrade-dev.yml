@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: onecat/nezha-agent
-          ref: b5f5a231f27a391e5d0c5a85da07b1689ca459e8
+          ref: b449c09a518d5466ec860682b85a8657d21e706b
           path: joint-agent
           persist-credentials: false
       - uses: actions/setup-go@v5
@@ -107,6 +107,8 @@ jobs:
           cp "$RUNNER_TEMP/joint-bin/agent-v0.30.00" candidate/nezha-agent-v0.30.00
           cp "$RUNNER_TEMP/joint-bin/agent-v0.30.01" candidate/nezha-agent-v0.30.01
           cp joint-agent/deploy/nezha-supervisor.service candidate/
+          cp joint-agent/docs/linux-deployment.md candidate/
+          cp docs/managed-upgrade-control.md docs/managed-upgrade-proxy.md candidate/
           cp LICENSE candidate/LICENSE-dashboard
           cp joint-agent/LICENSE candidate/LICENSE-agent
           printf 'Dashboard=%s\nAgent=%s\nPlatform=linux/%s\nGo=%s\n' "$GITHUB_SHA" "$(git -C joint-agent rev-parse HEAD)" "$arch" "$(go version)" > candidate/SOURCES.txt

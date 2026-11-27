@@ -9,7 +9,7 @@ import (
  core "github.com/naiba/nezha/pkg/agentupgrade"
 )
 
-// HighWater derives a conservative Dashboard floor from immutable grants.
+// HighWater derives a conservative Dashboard floor from immutable grants and aborted reservations.
 // The independently provisioned Agent ledger remains authoritative.
 func(s *Store) HighWater(ctx context.Context,server,initial uint64)(uint64,error){
  if server==0||initial==0{return 0,errors.New("missing initial sequence")}
@@ -24,6 +24,18 @@ func(s *Store) HighWater(ctx context.Context,server,initial uint64)(uint64,error
  for _,g:=range grants{
   t,err:=core.DecodeSnapshot(g.Grant)
   if err!=nil||t.ServerID!=server||t.ID!=g.TaskID||t.State!=core.StateInstalling{return 0,errors.New("invalid grant history")}
+  if t.ReleaseSequence>high{high=t.ReleaseSequence}
+ }
+ var aborted []abortedReservationRow
+ err=s.db.WithContext(ctx).Table("managed_agent_upgrade_aborted_reservations").
+  Joins("JOIN managed_agent_upgrade_tasks ON managed_agent_upgrade_tasks.id = managed_agent_upgrade_aborted_reservations.task_id").
+  Where("managed_agent_upgrade_tasks.server_id = ?",server).
+  Select("managed_agent_upgrade_aborted_reservations.*").Limit(10001).Find(&aborted).Error
+ if err!=nil{return 0,err}
+ if len(aborted)>10000{return 0,errors.New("aborted reservation history requires maintenance")}
+ for _,a:=range aborted{
+  t,err:=core.DecodeSnapshot(a.Snapshot)
+  if err!=nil||t.ServerID!=server||t.ID!=a.TaskID||t.State!=core.StateFailed||a.RecordedAt.IsZero(){return 0,errors.New("invalid aborted reservation history")}
   if t.ReleaseSequence>high{high=t.ReleaseSequence}
  }
  return high,nil
