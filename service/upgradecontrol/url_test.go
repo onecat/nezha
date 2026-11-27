@@ -1,5 +1,5 @@
 package upgradecontrol
-import("testing";"strings";"net/url")
+import("testing";"strings";"net/url";"os";"path/filepath";"bytes")
 func TestURLReleaseBoundary(t *testing.T){
  valid:=releasePrefix+"v0.30.01/"+binaryName
  if v,e:=parseRelease(valid);e!=nil||v!="v0.30.01"{t.Fatal(v,e)}
@@ -12,4 +12,16 @@ func TestLocalSigningKeyStable(t *testing.T){
  root:=t.TempDir()
  a,err:=localSigningKey(root);if err!=nil{t.Fatal(err)}
  b,err:=localSigningKey(root);if err!=nil||!a.Equal(b){t.Fatal("signing key changed",err)}
+}
+
+func TestLocalSigningKeyRejectsUnsafeExistingSeed(t *testing.T){
+ root:=t.TempDir()
+ path:=filepath.Join(root,"signing.seed")
+ if err:=os.WriteFile(path,bytes.Repeat([]byte{7},32),0644);err!=nil{t.Fatal(err)}
+ if _,err:=localSigningKey(root);err==nil{t.Fatal("public seed accepted")}
+ if err:=os.Chmod(path,0600);err!=nil{t.Fatal(err)}
+ if _,err:=localSigningKey(root);err!=nil{t.Fatal(err)}
+ if err:=os.WriteFile(path,[]byte("invalid"),0600);err!=nil{t.Fatal(err)}
+ if _,err:=localSigningKey(root);err==nil{t.Fatal("invalid seed accepted")}
+ got,err:=os.ReadFile(path);if err!=nil||string(got)!="invalid"{t.Fatal("existing seed overwritten",err)}
 }

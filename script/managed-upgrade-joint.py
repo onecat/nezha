@@ -178,6 +178,10 @@ http {
                 sid=next(row["id"] for row in listing if row["name"]==name)
                 targets.append((sid,secret))
             if url_mode:
+                seed_path=work/"dashboard.db.url-upgrade"/"signing.seed"
+                seed=seed_path.read_bytes()
+                if len(seed)!=32 or seed_path.stat().st_mode & 0o077:
+                    raise RuntimeError("automatic signing seed not securely initialized")
                 sid,secret=targets[0]
                 root=work/"url-agent"
                 root.mkdir(mode=0o700)
@@ -200,6 +204,8 @@ http {
                 dashboard=start("url-reopened",args,env)
                 client=browser()
                 wait("URL Dashboard restart",up,60)
+                if seed_path.read_bytes()!=seed:
+                    raise RuntimeError("automatic signing seed changed after restart")
                 login()
                 if getjson("/api/managed-upgrade/status/"+task)["Task"]["State"]!="succeeded":
                     raise RuntimeError("URL receipt lost after restart")

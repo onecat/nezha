@@ -62,8 +62,10 @@ func localSigningKey(root string)(ed25519.PrivateKey,error){
   if _,err=f.Write(seed);err!=nil{return nil,err};if err=f.Sync();err!=nil{return nil,err}
   if err=os.Link(f.Name(),path);err!=nil&&!errors.Is(err,os.ErrExist){return nil,err}
   d,err:=os.Open(root);if err!=nil{return nil,err};err=d.Sync();d.Close();if err!=nil{return nil,err}
-  st,err=os.Lstat(path)
  }
+ // Re-read outside the creation scope: a successful first creation must
+ // not retain the original os.ErrNotExist from the outer lookup.
+ st,err=os.Lstat(path)
  if err!=nil||!st.Mode().IsRegular()||st.Mode().Perm()&0077!=0||st.Size()!=ed25519.SeedSize{return nil,errors.New("invalid private signing seed")}
  file,err:=os.Open(path);if err!=nil{return nil,err};defer file.Close()
  actual,err:=file.Stat();if err!=nil||!os.SameFile(st,actual){return nil,errors.New("signing seed changed")}
