@@ -17,13 +17,14 @@ import (
  "gorm.io/gorm"
 )
 
-// RPC exposes download and verification acknowledgement only. It never
-// grants installation permission. A nil scheduler is explicitly disabled.
+// RPC exposes the managed upgrade transport. A nil scheduler is disabled.
 type RPC struct{
  Scheduler *Scheduler
  Authenticate func(context.Context)(uint64,error)
  // Only for a TLS-terminating local reverse proxy with protected backend.
  AllowLoopbackProxy bool
+ // Separate explicit gate; disabled until production qualification.
+ AllowExecution bool
 }
 func(r *RPC) identity(ctx context.Context)(uint64,error){
  if r.Scheduler==nil||!r.Scheduler.config.Enabled||r.Authenticate==nil{return 0,status.Error(codes.Unavailable,"managed upgrade disabled")}
