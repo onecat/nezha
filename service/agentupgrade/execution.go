@@ -19,6 +19,10 @@ type executionRow struct{
  Grant []byte `gorm:"not null"`
  Result []byte
  ResultAt *time.Time
+ LateResult []byte
+ LateResultAt *time.Time
+ ReviewedBy uint64
+ ReviewedAt *time.Time
 }
 func(executionRow)TableName()string{return "managed_agent_upgrade_executions"}
 
@@ -62,7 +66,7 @@ func(s *Store) recordResult(ctx context.Context,t core.Transaction,now time.Time
   return err
  }
  grant,err:=core.DecodeSnapshot(exec.Grant)
- if err!=nil||grant.State!=core.StateInstalling||!grant.SameIdentity(t)||!grant.ExpiresAt.Equal(t.ExpiresAt)||exec.GrantedAt.IsZero(){return errors.New("invalid execution grant")}
+ if err!=nil||grant.State!=core.StateInstalling||!grant.SameIdentity(t)||!grant.ExpiresAt.Equal(t.ExpiresAt)||exec.GrantedAt.IsZero()||!exec.GrantedAt.Before(t.ExpiresAt)||now.IsZero(){return errors.New("invalid execution grant")}
  b,err:=core.EncodeSnapshot(t)
  if err!=nil{return err}
  if len(exec.Result)!=0{
@@ -70,11 +74,15 @@ func(s *Store) recordResult(ctx context.Context,t core.Transaction,now time.Time
   return ErrConflict
  }
  if r.Task.State!=core.StateInstalling||r.Revision==math.MaxInt64{return ErrConflict}
- // Successful results must arrive before expiry. Late failures/rollbacks
- // remain reportable; an expired success requires operator reconciliation.
+ // A late success is evidence for explicit review, not an automatic
+ // authorization to install or an automatically successful canary.
+ if len(exec.LateResult)!=0{
+  if t.State==core.StateSucceeded&&string(exec.LateResult)==string(b)&&exec.LateResultAt!=nil{return ErrLateSuccessReview}
+  return ErrConflict
+ }
  switch t.State{
  case core.StateSucceeded:
-  if !now.Before(t.ExpiresAt){return errors.New("late success requires reconciliation")}
+  if !now.Before(t.ExpiresAt){return s.recordLateSuccess(ctx,r,t,b,now)}
  case core.StateFailed,core.StateRolledBack:
  default:return errors.New("nonterminal result")
  }
@@ -84,7 +92,7 @@ func(s *Store) recordResult(ctx context.Context,t core.Transaction,now time.Time
   res:=tx.Model(&taskRow{}).Where("id = ? AND revision = ? AND snapshot = ?",t.ID,r.Revision,before).Updates(map[string]any{"revision":r.Revision+1,"snapshot":b,"active_server_id":nil})
   if res.Error!=nil{return res.Error}
   if res.RowsAffected!=1{return ErrConflict}
-  res=tx.Model(&executionRow{}).Where("task_id = ? AND result IS NULL",t.ID).Updates(map[string]any{"result":b,"result_at":now.UTC()})
+  res=tx.Model(&executionRow{}).Where("task_id = ? AND result IS NULL AND late_result IS NULL",t.ID).Updates(map[string]any{"result":b,"result_at":now.UTC()})
   if res.Error!=nil{return res.Error}
   if res.RowsAffected!=1{return ErrConflict}
   return nil

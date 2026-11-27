@@ -57,9 +57,33 @@ func(ma *memberAPI) admitUpgradeWave(c *gin.Context){
  c.JSON(http.StatusOK,gin.H{"tasks":rows})
 }
 func(ma *memberAPI) upgradeStatus(c *gin.Context){
- control,_,ok:=upgradeAccess(c)
- if !ok{return}
- r,err:=control.Scheduler.Status(c.Request.Context(),c.Param("task"))
+ _,ok:=upgradeOperator(c)
+ if !ok{c.AbortWithStatus(http.StatusForbidden);return}
+ control:=upgradecontrol.Current
+ if control==nil{c.AbortWithStatus(http.StatusServiceUnavailable);return}
+ r,err:=control.Scheduler.StatusDetail(c.Request.Context(),c.Param("task"))
  if err!=nil{c.AbortWithStatus(http.StatusNotFound);return}
+ c.JSON(http.StatusOK,r)
+}
+
+func(ma *memberAPI) reconcileUpgrade(c *gin.Context){
+ id,ok:=upgradeOperator(c)
+ if !ok{c.AbortWithStatus(http.StatusForbidden);return}
+ control:=upgradecontrol.Current
+ if control==nil{c.AbortWithStatus(http.StatusServiceUnavailable);return}
+ if c.ContentType()!="application/json"{c.AbortWithStatus(http.StatusUnsupportedMediaType);return}
+ c.Request.Body=http.MaxBytesReader(c.Writer,c.Request.Body,2048)
+ var input struct{
+  Revision int64 `json:"revision"`
+  Digest string `json:"digest"`
+  Confirmed bool `json:"confirmed"`
+ }
+ d:=json.NewDecoder(c.Request.Body);d.DisallowUnknownFields()
+ if err:=d.Decode(&input);err!=nil||!input.Confirmed||input.Revision<1{c.AbortWithStatus(http.StatusBadRequest);return}
+ if err:=d.Decode(new(any));err!=io.EOF{c.AbortWithStatus(http.StatusBadRequest);return}
+ ctx,cancel:=context.WithTimeout(c.Request.Context(),10*time.Second)
+ defer cancel()
+ r,err:=control.Scheduler.ReconcileLateSuccess(ctx,id,c.Param("task"),input.Revision,input.Digest)
+ if err!=nil{c.JSON(http.StatusConflict,gin.H{"message":"确认失败：任务、当前上报版本或权限不匹配"});return}
  c.JSON(http.StatusOK,r)
 }

@@ -45,13 +45,15 @@ func (mp *memberPage) api(c *gin.Context) {
 
 func (mp *memberPage) server(c *gin.Context) {
  _,operatorOK:=upgradeOperator(c)
- upgradeEnabled:=operatorOK&&upgradecontrol.Current!=nil&&upgradecontrol.Current.Execution
+ upgradeVisible:=operatorOK&&upgradecontrol.Current!=nil
+ upgradeEnabled:=upgradeVisible&&upgradecontrol.Current.Execution
 	singleton.SortedServerLock.RLock()
 	defer singleton.SortedServerLock.RUnlock()
 	c.HTML(http.StatusOK, "dashboard-"+singleton.Conf.Site.DashboardTheme+"/server", mygin.CommonEnvironment(c, gin.H{
 		"Title":   singleton.Localizer.MustLocalize(&i18n.LocalizeConfig{MessageID: "ServersManagement"}),
 		"Servers": singleton.SortedServerList,
  "ManagedUpgradeEnabled":upgradeEnabled,
+ "ManagedUpgradeVisible":upgradeVisible,
 	}))
 }
 

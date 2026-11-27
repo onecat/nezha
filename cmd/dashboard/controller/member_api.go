@@ -39,6 +39,7 @@ func (ma *memberAPI) serve() {
  mr.POST("/managed-upgrade/package",ma.uploadUpgrade)
  mr.POST("/managed-upgrade/wave",ma.admitUpgradeWave)
  mr.GET("/managed-upgrade/status/:task",ma.upgradeStatus)
+ mr.POST("/managed-upgrade/reconcile/:task",ma.reconcileUpgrade)
 	mr.GET("/search-server", ma.searchServer)
 	mr.GET("/search-tasks", ma.searchTask)
 	mr.GET("/search-ddns", ma.searchDDNS)

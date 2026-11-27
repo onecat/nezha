@@ -244,6 +244,20 @@ http {
             supervisors[ids[0]]=start(f"supervisor-reopened-{ids[0]}",[BIN/"supervisor","--config",root/"supervisor.json"])
             wait("Restart retains rollback outcome",lambda:result(rollback,ids[0],"rolled_back","v0.30.01",3),120)
             request("/api/managed-upgrade/wave",{"servers":ids[:1],"digest":bad,"canary":""},expected=409)
+            # Pausing execution must preserve administrator status visibility.
+            stop(dashboard)
+            cfg["allow_execution"]=False
+            config(work/"upgrade.json",cfg)
+            dashboard=start("dashboard-paused",args,env)
+            client=browser()
+            wait("Paused Dashboard restart",up,60)
+            login()
+            paused=getjson("/api/managed-upgrade/status/"+rollback)
+            if paused["Task"]["State"]!="rolled_back":
+                raise RuntimeError("paused status lost")
+            request("/api/managed-upgrade/wave",{"servers":ids[:1],"digest":bad,"canary":""},expected=503)
+            request("/api/managed-upgrade/reconcile/"+rollback,{"revision":paused["Revision"],"digest":bad,"confirmed":True},origin="https://invalid.example",expected=403)
+            print("Paused status and reconciliation origin guard: passed",flush=True)
             print("Native joint managed upgrade passed: "+ARCH,flush=True)
         except Exception:
             # Report only bounded non-secret diagnostic fields. Never print

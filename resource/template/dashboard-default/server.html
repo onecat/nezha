@@ -13,6 +13,9 @@
                 <button class="ui right labeled nezha-primary-btn icon button" onclick="batchEditServerGroup()"><i
                         class="edit icon"></i> {{tr "BatchEditServerGroup"}}
                 </button>
+                {{if .ManagedUpgradeVisible}}
+                <button type="button" class="ui button" onclick="managedUpgradeStatus()">升级状态</button>
+                {{end}}
                 <button class="ui right labeled nezha-primary-btn icon button" onclick="batchDeleteServer()"><i
                         class="trash icon"></i> {{tr "BatchDeleteServer"}}
                 </button>
@@ -130,6 +133,27 @@
             const ids=(data.tasks||[]).map(x=>x.Task.ID);
             alert((res.ok?'任务已创建':'部分或全部任务未创建')+'\n任务 ID：'+ids.join(', ')+'\n状态接口：/api/managed-upgrade/status/<任务ID>');
         }catch(e){alert('升级请求失败，请核对任务状态后再试');}
+    }
+    {{end}}
+    {{if .ManagedUpgradeVisible}}
+    async function managedUpgradeStatus() {
+        const raw=prompt('请输入升级任务 ID');
+        if(raw===null)return;
+        const id=raw.trim();
+        if(!/^[a-zA-Z0-9_-]{1,128}$/.test(id)){alert('任务 ID 格式错误');return;}
+        try {
+            const r=await fetch('/api/managed-upgrade/status/'+encodeURIComponent(id),{cache:'no-store'});
+            if(!r.ok)throw Error('无法查询任务');
+            const data=await r.json(), t=data.Task;
+            const summary='任务：'+t.ID+'\n服务器：'+t.ServerID+'\n目标版本：'+t.Version+'\nSHA256：'+t.PackageSHA256+'\n状态：'+t.State;
+            if(!data.LateSuccessAt||data.ReviewedAt||t.State!=='installing'){
+                alert(summary+(data.ReviewedAt?'\n已人工确认：'+data.ReviewedAt:''));
+                return;
+            }
+            if(!confirm(summary+'\n收到超时的成功回执。只有在现场核对 Agent 持久化状态为 succeeded、已安装二进制及对应版本均正确后才可确认。确认不会再次安装，也不能用作灰度通过依据。是否继续？'))return;
+            const reply=await fetch('/api/managed-upgrade/reconcile/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:data.Revision,digest:t.PackageSHA256,confirmed:true})});
+            alert(reply.ok?'已记录人工确认，Agent 可重试结果回执':'确认失败，请核查实际版本、任务和权限');
+        }catch(e){alert('状态查询或确认失败，请检查任务后重试');}
     }
     {{end}}
     function batchEditServerGroup() {

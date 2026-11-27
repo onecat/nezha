@@ -61,7 +61,7 @@ func(s *Scheduler) AdmitWave(ctx context.Context,operator uint64,servers []uint6
   var execution executionRow
   if err:=s.store.db.WithContext(ctx).First(&execution,"task_id = ?",canaryID).Error;err!=nil{return nil,err}
   result,err:=core.DecodeSnapshot(execution.Result)
-  if err!=nil||!result.SameIdentity(r.Task)||result.State!=core.StateSucceeded||execution.ResultAt==nil{return nil,errors.New("canary result unavailable")}
+  if err!=nil||!result.SameIdentity(r.Task)||result.State!=core.StateSucceeded||execution.ResultAt==nil||execution.LateResultAt!=nil{return nil,errors.New("canary result unavailable")}
  }
  out:=make([]Record,0,len(servers))
  for _,id:=range servers{
