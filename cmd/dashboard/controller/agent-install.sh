@@ -36,6 +36,7 @@ repo=https://github.com/onecat/nezha-agent/releases/download
 tmp=$(mktemp -d)
 backup=
 new_install=0
+new_root_created=0
 old_active=0
 old_enabled=0
 changed=0
@@ -58,7 +59,7 @@ except Exception:
 ' "$managed/state/upgrade-state.json"; then
                 printf 'Managed state retained; service stopped. Review backup: %s\n' "$backup" >&2
             else
-                if [[ -d "$root" ]]; then mv -T "$root" "$backup/failed-new-agent" || true; fi
+                if (( new_root_created )) && [[ -d "$root" ]]; then mv -T "$root" "$backup/failed-new-agent" || true; fi
                 if [[ -e "$backup/old-agent" ]]; then mv -T "$backup/old-agent" "$root" || true; fi
                 rm -f "$unit"
                 if [[ -e "$backup/old-unit" || -L "$backup/old-unit" ]]; then cp -a "$backup/old-unit" "$unit"; fi
@@ -69,6 +70,7 @@ except Exception:
             fi
         else
             # Existing managed ledger is never reset or rolled back manually.
+            if (( old_active && ! started )); then systemctl start "$service" || true; fi
             printf 'Managed reinstall failed; existing config and ledger retained. Check journalctl -u %s.\n' "$service" >&2
         fi
     fi
@@ -132,6 +134,7 @@ endpoint,secret=sys.stdin.read().splitlines()
 cfg=json.load(open(sys.argv[1]))
 if cfg.get("server")!=endpoint or cfg.get("client_secret")!=secret:sys.exit("Existing Agent identity differs; refusing to overwrite it")
 ' "$managed/agent.json"
+    changed=1
     systemctl stop "$service"
     # Read durable version only after the old process has stopped.
     if ! version=$(runuser -u "$account" -- python3 -c '
@@ -141,14 +144,9 @@ if s.get("schema")!=2 or s.get("highest_sequence",0)<1 or not s.get("current_ver
 if s.get("task_snapshot") is not None and not s.get("result_reported"):sys.exit("Unresolved upgrade; restart existing service for reconciliation")
 print(s["current_version"])
 ' "$managed/state/upgrade-state.json"); then
-        if (( old_active )); then systemctl start "$service" || true; fi
         die "Ledger needs reconciliation."
     fi
-    if ! fetch_binaries "$version"; then
-        if (( old_active )); then systemctl start "$service" || true; fi
-        die "Release download failed; existing installation preserved."
-    fi
-    changed=1
+    fetch_binaries "$version"
     # Work inside the service-owned tree as that service account, not root.
     cat "$tmp/nezha-agent-linux-amd64" | runuser -u "$account" -- bash -c '
 set -eu; umask 077; dir=$1; t=$(mktemp "$dir/.reinstall-XXXXXX"); trap "rm -f -- \"$t\"" EXIT
@@ -168,6 +166,7 @@ else
     changed=1
     if [[ -d "$root" ]]; then mv -T "$root" "$backup/old-agent"; fi
     install -d -m 0755 "$root"
+    new_root_created=1
     install -d -m 0700 -o "$account" -g "$(id -gn "$account")" "$managed" "$managed/install" "$managed/state" "$managed/stage"
     install -m 0700 -o "$account" -g "$(id -gn "$account")" "$tmp/nezha-agent-linux-amd64" "$managed/install/nezha-agent"
     install -m 0755 "$tmp/nezha-supervisor-linux-amd64" "$root/nezha-supervisor"

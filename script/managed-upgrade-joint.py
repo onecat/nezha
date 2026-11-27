@@ -235,8 +235,10 @@ http {
                         sudo("install","-m","0644",legacy_unit,"/etc/systemd/system/nezha-agent.service",check=True)
                         sudo("systemctl","daemon-reload",check=True)
                         sudo("systemctl","enable","--now","nezha-agent.service",check=True)
+                        bundle=work/"combined-ca.pem"
+                        bundle.write_bytes(pathlib.Path("/etc/ssl/certs/ca-certificates.crt").read_bytes()+b"\n"+(work/"tls.pem").read_bytes())
                         def copied_install():
-                            p=sudo("env","CURL_CA_BUNDLE="+str(work/"tls.pem"),"NZ_AGENT_CA_FILE="+str(work/"tls.pem"),"bash","-c",command,timeout=360)
+                            p=sudo("env","CURL_CA_BUNDLE="+str(bundle),"NZ_AGENT_CA_FILE="+str(work/"tls.pem"),"bash","-c",command,timeout=360)
                             if p.returncode!=0:raise RuntimeError("copied installation command failed")
                         copied_install()
                         def installed_report():
