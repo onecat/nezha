@@ -13,8 +13,7 @@
 ## 下载与部署
 
 - `nezha-app`：Linux amd64 Dashboard，沿用原有下载名称。
-- `nezha-app-linux-arm64`：Linux arm64 Dashboard。
-- `managed-upgrade-v0.30.06-linux-amd64.tar.gz` / `managed-upgrade-v0.30.06-linux-arm64.tar.gz`：对应平台的 Agent v0.30.00、Supervisor、离线签名工具、systemd 模板及配置/迁移/异常处理文档。
-- `SHA256SUMS`：本次发布文件校验值。
+- Agent 与 Supervisor 独立下载：[onecat/nezha-agent v0.30.00](https://github.com/onecat/nezha-agent/releases/tag/v0.30.00)。离线签名工具和部署文档见本仓库源码。
+- `SHA256SUMS`：`nezha-app` 文件校验值。
 
 升级前备份现有 Dashboard 配置、数据库及旧版程序。先在测试主机验证基础监控，再明确开启集中升级。分发包未使用生产 Ed25519 私钥签名，不能直接当作 .nzu 集中升级包；需管理员自行离线签名。此次发布不会部署到生产服务器，也不会修改 v0.30.05 标签。
