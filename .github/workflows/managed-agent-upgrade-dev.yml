@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: onecat/nezha-agent
-          ref: b449c09a518d5466ec860682b85a8657d21e706b
+          ref: c2bdc30fb9e4a5239e9b0540109fc5f9be6d0487
           path: joint-agent
           persist-credentials: false
       - uses: actions/setup-go@v5
@@ -87,7 +87,8 @@ jobs:
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/joint-bin"
-          go build -mod=readonly -trimpath -ldflags="-X github.com/naiba/nezha/service/singleton.Version=v0.30.06-rc" -o "$RUNNER_TEMP/joint-bin/dashboard" ./cmd/dashboard
+          go build -mod=readonly -trimpath -ldflags="-X github.com/naiba/nezha/service/singleton.Version=v0.30.06" -o "$RUNNER_TEMP/joint-bin/dashboard" ./cmd/dashboard
+          test "$("$RUNNER_TEMP/joint-bin/dashboard" -v)" = v0.30.06
           go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/agent-package" ./cmd/agent-package
           cd joint-agent
           go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/supervisor" ./cmd/supervisor
@@ -108,7 +109,7 @@ jobs:
           cp "$RUNNER_TEMP/joint-bin/agent-v0.30.01" candidate/nezha-agent-v0.30.01
           cp joint-agent/deploy/nezha-supervisor.service candidate/
           cp joint-agent/docs/linux-deployment.md candidate/
-          cp docs/managed-upgrade-control.md docs/managed-upgrade-proxy.md candidate/
+          cp docs/managed-upgrade-control.md docs/managed-upgrade-proxy.md docs/managed-upgrade-operations.md candidate/
           cp LICENSE candidate/LICENSE-dashboard
           cp joint-agent/LICENSE candidate/LICENSE-agent
           printf 'Dashboard=%s\nAgent=%s\nPlatform=linux/%s\nGo=%s\n' "$GITHUB_SHA" "$(git -C joint-agent rev-parse HEAD)" "$arch" "$(go version)" > candidate/SOURCES.txt
@@ -157,3 +158,68 @@ jobs:
         run: |
           python3 script/audit-frontend.py || test -s frontend-audit.json
           python3 script/check-frontend-disposition.py
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/agent-upgrade-v0.30.06' && github.event.head_commit.message == 'release: qualify and publish Dashboard v0.30.06'
+    needs: [package-verification, dashboard-storage, joint-upgrade, security-regression]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: unsigned-test-candidate-ubuntu-24.04
+          path: paired-artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: unsigned-test-candidate-ubuntu-24.04-arm
+          path: paired-artifacts
+      - name: Verify and stage exact native tested binaries
+        run: |
+          set -eu
+          mkdir -p release-dist
+          for arch in amd64 arm64; do
+            temp=$(mktemp -d)
+            tar -xzf "paired-artifacts/nezha-test-candidate-linux-$arch.tar.gz" -C "$temp"
+            (cd "$temp" && sha256sum -c SHA256SUMS)
+            grep -Fx "Dashboard=$GITHUB_SHA" "$temp/SOURCES.txt"
+            grep -Fx "Agent=c2bdc30fb9e4a5239e9b0540109fc5f9be6d0487" "$temp/SOURCES.txt"
+            grep -Fx "Platform=linux/$arch" "$temp/SOURCES.txt"
+            if [ "$arch" = amd64 ]; then
+              test "$("$temp/nezha-dashboard" -v)" = v0.30.06
+              install -m 0755 "$temp/nezha-dashboard" release-dist/nezha-app
+            else
+              install -m 0755 "$temp/nezha-dashboard" release-dist/nezha-app-linux-arm64
+            fi
+            # v0.30.01 is a version-labelled test fixture, not a separate release.
+            rm "$temp/nezha-agent-v0.30.01" "$temp/nezha-dashboard" "$temp/SHA256SUMS"
+            mv "$temp/nezha-agent-v0.30.00" "$temp/nezha-agent"
+            (cd "$temp" && sha256sum * > SHA256SUMS && sha256sum -c SHA256SUMS)
+            tar -C "$temp" -czf "release-dist/managed-upgrade-v0.30.06-linux-$arch.tar.gz" .
+            rm -rf "$temp"
+          done
+          (cd release-dist && sha256sum * > SHA256SUMS && sha256sum -c SHA256SUMS)
+      - name: Confirm matching Agent release and publish Dashboard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          # No cross-repository write token; verify the independent public release.
+          for attempt in $(seq 1 30); do
+            agent_sha=$(gh api repos/onecat/nezha-agent/git/ref/tags/v0.30.00 --jq '.object.sha' 2>/dev/null || true)
+            agent_tag=$(gh api repos/onecat/nezha-agent/releases/tags/v0.30.00 --jq 'select(.draft == false and .prerelease == false) | .tag_name' 2>/dev/null || true)
+            if [ "$agent_sha" = "c2bdc30fb9e4a5239e9b0540109fc5f9be6d0487" ] && [ "$agent_tag" = v0.30.00 ]; then break; fi
+            sleep 10
+          done
+          test "$agent_sha" = "c2bdc30fb9e4a5239e9b0540109fc5f9be6d0487"
+          test "$agent_tag" = v0.30.00
+          if gh release view v0.30.06 >/dev/null 2>&1; then
+            echo "Release already exists; refusing to overwrite"
+            exit 1
+          fi
+          gh release create v0.30.06 release-dist/* --target "$GITHUB_SHA" --title "Nezha v0.30.06" --notes-file RELEASE_V03006.md --latest
