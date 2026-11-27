@@ -249,12 +249,27 @@ http {
                     request("/agent-install.sh?sha256="+"0"*64,expected=409,session=browser())
                     print("Clipboard command, selected identity and exact embedded script checksum: passed",flush=True)
                     # Real systemd migration on the disposable native CI runner.
-                    if pathlib.Path("/opt/nezha/agent").exists() or pathlib.Path("/etc/systemd/system/nezha-agent.service").exists():
+                    opt=pathlib.Path("/opt")
+                    base_dir=opt/"nezha"
+                    unit_path=pathlib.Path("/etc/systemd/system/nezha-agent.service")
+                    if base_dir.exists() or base_dir.is_symlink() or unit_path.exists() or unit_path.is_symlink():
                         raise RuntimeError("installer CI must use a clean host")
+                    opt_stat=opt.lstat()
+                    if opt.is_symlink() or not opt.is_dir() or opt_stat.st_uid!=0:
+                        raise RuntimeError("CI /opt must be a real root-owned directory")
+                    original_opt_mode=opt_stat.st_mode & 0o7777
                     def sudo(*argv,**kw):
                         return subprocess.run(["sudo","-n",*map(str,argv)],**kw)
                     try:
-                        sudo("install","-d","-m","0755","/opt/nezha/agent",check=True)
+                        # Hosted runners may give their users write access to /opt.
+                        # Match a trusted production ancestor in this disposable
+                        # test host only. The installer must still reject writable
+                        # ancestors and must never chmod them on customer machines.
+                        sudo("chmod","go-w","/opt",check=True)
+                        if opt.stat().st_mode & 0o022:
+                            raise RuntimeError("CI /opt remains group/world writable")
+                        print("CI trusted /opt fixture prepared",flush=True)
+                        sudo("install","-d","-o","root","-g","root","-m","0755","/opt/nezha","/opt/nezha/agent",check=True)
                         legacy=work/"legacy-marker"
                         legacy.write_text("legacy installation")
                         sudo("install","-m","0600",legacy,"/opt/nezha/agent/legacy-marker",check=True)
@@ -284,15 +299,31 @@ http {
                         ledger=sudo("cat",ledger_path,check=True,stdout=subprocess.PIPE).stdout
                         if json.loads(ledger)["server_id"]!=install_sid:
                             raise RuntimeError("installer enrollment identity mismatch")
+                        saved_config_path="/opt/nezha/agent/managed/agent.json"
+                        saved_config=sudo("cat",saved_config_path,check=True,stdout=subprocess.PIPE).stdout
+                        saved_supervisor=sudo("cat","/opt/nezha/agent/managed/supervisor.json",check=True,stdout=subprocess.PIPE).stdout
+                        marker_paths=sudo("find","/opt/nezha","-maxdepth","3","-name","legacy-marker","-type","f",check=True,stdout=subprocess.PIPE,text=True).stdout.splitlines()
+                        if len(marker_paths)!=1 or "/.agent-backup-" not in marker_paths[0] or sudo("cat",marker_paths[0],check=True,stdout=subprocess.PIPE).stdout!=b"legacy installation":
+                            raise RuntimeError("legacy directory backup missing or changed")
+                        before_report=getjson("/api/v1/server/details?id="+str(install_sid))["result"][0]["last_active"]
                         copied_install()
                         if sudo("cat",ledger_path,check=True,stdout=subprocess.PIPE).stdout!=ledger:
                             raise RuntimeError("reinstall changed durable ledger")
-                        wait("Reinstalled service accepted reports",installed_report,90)
+                        if sudo("cat",saved_config_path,check=True,stdout=subprocess.PIPE).stdout!=saved_config or sudo("cat","/opt/nezha/agent/managed/supervisor.json",check=True,stdout=subprocess.PIPE).stdout!=saved_supervisor:
+                            raise RuntimeError("reinstall changed Agent configuration or pinned identity")
+                        def fresh_reinstall_report():
+                            row=getjson("/api/v1/server/details?id="+str(install_sid))["result"][0]
+                            return (row.get("host") or {}).get("Version")=="v0.30.02" and bool(row.get("status")) and row.get("last_active",0)>before_report
+                        wait("Reinstalled service accepted fresh reports",fresh_reinstall_report,90)
                         print("Systemd legacy migration and state-preserving reinstall passed",flush=True)
                     finally:
-                        sudo("systemctl","disable","--now","nezha-agent.service",stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-                        sudo("rm","-f","/etc/systemd/system/nezha-agent.service",check=True)
-                        sudo("systemctl","daemon-reload",check=True)
+                        try:
+                            sudo("systemctl","disable","--now","nezha-agent.service",stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                            sudo("rm","-f","/etc/systemd/system/nezha-agent.service",check=True)
+                            sudo("systemctl","daemon-reload",check=True)
+                            sudo("rm","-rf","--","/opt/nezha",check=True)
+                        finally:
+                            sudo("chmod",format(original_opt_mode,"04o"),"/opt",check=True)
                 return
             stop(dashboard)
             cfg={"enabled":True,"allow_execution":True,"package_dir":str(work/"packages"),"linux_amd64":ARCH=="amd64","linux_arm64":ARCH=="arm64","keys":{"ci":pub},"targets":[{"id":sid,"secret_sha256":hashlib.sha256(secret.encode()).hexdigest(),"arch":ARCH,"initial_sequence":1} for sid,secret in targets]}
