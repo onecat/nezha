@@ -42,7 +42,8 @@ func Authorize(opt AuthorizeOption) func(*gin.Context) {
 		token, _ := c.Cookie(singleton.Conf.Site.CookieName)
 		token = strings.TrimSpace(token)
 		if token != "" {
-			if u, found := lookupSessionUser(singleton.DB, token); found {
+			u, found := lookupSessionUser(singleton.DB, token)
+			if found {
 				isLogin = u.TokenExpired.After(time.Now())
 				if isLogin {
 					if singleton.Conf.Oauth2.Type == model.ConfigTypeLocal {
@@ -100,8 +101,8 @@ func lookupAPIUser(db *gorm.DB, userID uint64) (model.User, bool) {
 	return user, err == nil
 }
 
- // Missing cookies are routine, not database faults. Find with a one-row
- // limit preserves genuine query errors without ErrRecordNotFound noise.
+// Missing cookies are routine, not database faults. Find with a one-row
+// limit preserves genuine query errors without ErrRecordNotFound noise.
 func lookupSessionUser(db *gorm.DB, token string)(model.User,bool){
  var u model.User
  if token==""{return u,false}

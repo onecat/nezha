@@ -155,12 +155,16 @@ http {
                     return False
             wait("Dashboard login",up,60)
             # Verify actual kernel listener addresses, not just parsed YAML.
-            listeners=subprocess.check_output(["ss","-H","-ltn"],text=True)
-            for port in (18008,15555):
-                matches=[line.split()[3] for line in listeners.splitlines() if line.split()[3].endswith(":"+str(port))]
-                if matches!=["127.0.0.1:"+str(port)]:
-                    raise RuntimeError("unexpected listener on port "+str(port)+": "+repr(matches))
-            print("Explicit loopback listeners: passed",flush=True)
+            def loopback_listeners():
+                listeners=subprocess.check_output(["ss","-H","-ltn"],text=True)
+                ready=True
+                for port in (18008,15555):
+                    matches=[line.split()[3] for line in listeners.splitlines() if len(line.split())>3 and line.split()[3].endswith(":"+str(port))]
+                    if any(addr!="127.0.0.1:"+str(port) for addr in matches):
+                        raise RuntimeError("unexpected non-loopback listener on port "+str(port)+": "+repr(matches))
+                    ready=ready and matches==["127.0.0.1:"+str(port)]
+                return ready
+            wait("Explicit loopback listeners",loopback_listeners,30)
             login()
             request("/api/managed-upgrade/wave",{"servers":[1],"digest":"a"*64},expected=503)
             targets=[]
@@ -178,6 +182,7 @@ http {
             dashboard=start("dashboard-managed",args,env)
             client=browser()
             wait("Managed Dashboard restart",up,60)
+            wait("Managed loopback listeners",loopback_listeners,30)
             login()
             if 'onclick="managedUpgrade()"' not in request("/server").decode():
                 raise RuntimeError("managed toolbar not enabled")

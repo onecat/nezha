@@ -21,4 +21,4 @@ proxygrpcport: 4433
 tls: true
 ```
 
-Merge these fields into existing configuration; keep local credentials private and unchanged. Restart is required. Nginx and Dashboard must share the network namespace when using loopback. Back up config and database; verify actual listener addresses after restart. Agent package signing and deployment remain operator-controlled. This development submission does not publish a tag or change existing releases.
+Merge these fields into existing configuration; keep local credentials private and unchanged. Restart is required. Nginx and Dashboard must share the network namespace when using loopback. Back up config and database; verify actual listener addresses after restart. Agent package signing and deployment remain operator-controlled. Release publication is gated on successful package, storage, native paired upgrade and security regression CI; the release job verifies the exact tested amd64 binary and the existing Agent release. Existing release tags are not changed.
