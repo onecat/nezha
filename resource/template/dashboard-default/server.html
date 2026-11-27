@@ -67,6 +67,14 @@
                     </td>
                     <td>
                         <div class="ui mini icon buttons">
+                            {{/* Fail closed: do not expose an upgrade action until authenticated API,
+                                 Agent capability negotiation and rollback are end-to-end verified.
+                                 v0.20.5 requires manual migration. */}}
+                            <button type="button" class="ui disabled button" disabled
+                                title="升级 Agent：集中升级尚未开放；旧版 v0.20.5 需要手动迁移"
+                                aria-label="升级 Agent（尚未开放）">
+                                <i class="arrow alternate circle up outline icon"></i> 升级 Agent
+                            </button>
                             <button class="ui button" onclick="connectToServer({{$server.ID}})">
                                 <i class="terminal icon"></i>
                             </button>
