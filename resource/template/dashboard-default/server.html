@@ -59,9 +59,9 @@
                         </button>
                     </td>
                     <td>
-                        {{if $.Conf.GRPCHost}}
-                        <button class="ui icon green mini button" data-clipboard-text="./nezha-agent -s {{$.Conf.GRPCHost}}:{{if $.Conf.ProxyGRPCPort}}{{$.Conf.ProxyGRPCPort}}{{else}}{{$.Conf.GRPCPort}}{{end}} -p {{$server.Secret}}{{if $.Conf.TLS}} --tls{{end}} --disable-auto-update --disable-force-update" data-tooltip="{{tr "ClickToCopy"}}"><i class="terminal icon"></i></button>
-                        {{else}}{{tr "NoDomainAlert"}}{{end}}
+                        {{with index $.AgentInstallCommands $server.ID}}
+                        <button class="ui icon green mini button" data-clipboard-text="{{.}}" data-tooltip="复制 Linux amd64 一键安装 / 重装命令（root）"><i class="terminal icon"></i></button>
+                        {{else}}<button class="ui icon disabled mini button" disabled title="需要 HTTPS 和自动升级模式，并配置 Agent 连接域名"><i class="terminal icon"></i></button>{{end}}
                     </td>
                     <td>
                         {{if $server.Note}}

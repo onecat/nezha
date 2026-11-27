@@ -1,13 +1,13 @@
-name: Dashboard v0.30.08 - configuration and security checks
+name: Dashboard v0.30.09 - configuration and security checks
 on:
   push:
-    branches: [url-upgrade-v0.30.08]
+    branches: [installer-v0.30.09]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   package-verification:
-    if: github.ref_name == 'url-upgrade-v0.30.08'
+    if: github.ref_name == 'installer-v0.30.09'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -23,7 +23,7 @@ jobs:
           go test -race -count=1 -v ./pkg/agentupgrade ./pkg/upgradewire ./cmd/agent-package
           go vet ./pkg/agentupgrade ./pkg/upgradewire ./cmd/agent-package
   dashboard-storage:
-    if: github.ref_name == 'url-upgrade-v0.30.08'
+    if: github.ref_name == 'installer-v0.30.09'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -46,7 +46,7 @@ jobs:
           go build ./cmd/dashboard
 
   joint-upgrade:
-    if: github.ref_name == 'url-upgrade-v0.30.08'
+    if: github.ref_name == 'installer-v0.30.09'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: onecat/nezha-agent
-          ref: 6b914d332d48251286563ec6e5b940c51708525e
+          ref: 8db6132617a82de0b30629f249124d3b2cf63157
           path: joint-agent
           persist-credentials: false
       - uses: actions/setup-go@v5
@@ -79,8 +79,8 @@ jobs:
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/joint-bin"
-          go build -mod=readonly -trimpath -ldflags="-X github.com/naiba/nezha/service/singleton.Version=v0.30.08" -o "$RUNNER_TEMP/joint-bin/dashboard" ./cmd/dashboard
-          test "$("$RUNNER_TEMP/joint-bin/dashboard" -v)" = v0.30.08
+          go build -mod=readonly -trimpath -ldflags="-X github.com/naiba/nezha/service/singleton.Version=v0.30.09" -o "$RUNNER_TEMP/joint-bin/dashboard" ./cmd/dashboard
+          test "$("$RUNNER_TEMP/joint-bin/dashboard" -v)" = v0.30.09
           go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/agent-package" ./cmd/agent-package
           cd joint-agent
           go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/supervisor" ./cmd/supervisor
@@ -93,17 +93,17 @@ jobs:
         run: |
           set -eu
           for attempt in $(seq 1 90); do
-            if curl -fsSL --max-time 15 https://github.com/onecat/nezha-agent/releases/download/v0.30.01/SHA256SUMS -o "$RUNNER_TEMP/agent-sums"; then break; fi
+            if curl -fsSL --max-time 15 https://github.com/onecat/nezha-agent/releases/download/v0.30.02/SHA256SUMS -o "$RUNNER_TEMP/agent-sums"; then break; fi
             sleep 10
           done
           grep 'nezha-agent-linux-amd64' "$RUNNER_TEMP/agent-sums"
-          NZ_JOINT_URL=1 python3 script/managed-upgrade-joint.py "$RUNNER_TEMP/joint-bin" "$(go env GOARCH)"
+          NZ_JOINT_INSTALLER=1 NZ_JOINT_URL=1 python3 script/managed-upgrade-joint.py "$RUNNER_TEMP/joint-bin" "$(go env GOARCH)"
       - name: Stage exact tested Dashboard binary
         run: |
           set -eu
           mkdir -p dist
           install -m 0755 "$RUNNER_TEMP/joint-bin/dashboard" dist/nezha-app
-          test "$(dist/nezha-app -v)" = v0.30.08
+          test "$(dist/nezha-app -v)" = v0.30.09
           (cd dist && sha256sum nezha-app > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
@@ -112,7 +112,7 @@ jobs:
           if-no-files-found: error
 
   security-regression:
-    if: github.ref_name == 'url-upgrade-v0.30.08'
+    if: github.ref_name == 'installer-v0.30.09'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -150,7 +150,7 @@ jobs:
 
   release:
     if: >-
-      github.event_name == 'push' && github.ref == 'refs/heads/url-upgrade-v0.30.08' && github.event.head_commit.message == 'release: qualify and publish Dashboard v0.30.08'
+      github.event_name == 'push' && github.ref == 'refs/heads/installer-v0.30.09' && github.event.head_commit.message == 'release: qualify and publish Dashboard v0.30.09'
     needs: [package-verification, dashboard-storage, joint-upgrade, security-regression]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -167,7 +167,7 @@ jobs:
       - name: Verify exact tested Dashboard binary
         run: |
           chmod +x release-dist/nezha-app
-          test "$(release-dist/nezha-app -v)" = v0.30.08
+          test "$(release-dist/nezha-app -v)" = v0.30.09
           (cd release-dist && sha256sum -c SHA256SUMS)
       - name: Confirm matching Agent release and publish Dashboard
         env:
@@ -177,15 +177,15 @@ jobs:
           set -eu
           # No cross-repository write token; verify the independent public release.
           for attempt in $(seq 1 30); do
-            agent_sha=$(gh api repos/onecat/nezha-agent/git/ref/tags/v0.30.01 --jq '.object.sha' 2>/dev/null || true)
-            agent_tag=$(gh api repos/onecat/nezha-agent/releases/tags/v0.30.01 --jq 'select(.draft == false and .prerelease == false) | .tag_name' 2>/dev/null || true)
-            if [ "$agent_sha" = "6b914d332d48251286563ec6e5b940c51708525e" ] && [ "$agent_tag" = v0.30.01 ]; then break; fi
+            agent_sha=$(gh api repos/onecat/nezha-agent/git/ref/tags/v0.30.02 --jq '.object.sha' 2>/dev/null || true)
+            agent_tag=$(gh api repos/onecat/nezha-agent/releases/tags/v0.30.02 --jq 'select(.draft == false and .prerelease == false) | .tag_name' 2>/dev/null || true)
+            if [ "$agent_sha" = "8db6132617a82de0b30629f249124d3b2cf63157" ] && [ "$agent_tag" = v0.30.02 ]; then break; fi
             sleep 10
           done
-          test "$agent_sha" = "6b914d332d48251286563ec6e5b940c51708525e"
-          test "$agent_tag" = v0.30.01
-          if gh release view v0.30.08 >/dev/null 2>&1; then
+          test "$agent_sha" = "8db6132617a82de0b30629f249124d3b2cf63157"
+          test "$agent_tag" = v0.30.02
+          if gh release view v0.30.09 >/dev/null 2>&1; then
             echo "Release already exists; refusing to overwrite"
             exit 1
           fi
-          gh release create v0.30.08 release-dist/nezha-app release-dist/SHA256SUMS --target "$GITHUB_SHA" --title "Nezha v0.30.08" --notes-file RELEASE_V03008.md --latest
+          gh release create v0.30.09 release-dist/nezha-app release-dist/SHA256SUMS --target "$GITHUB_SHA" --title "Nezha v0.30.09" --notes-file RELEASE_V03009.md --latest
