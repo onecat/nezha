@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"fmt"
+ "context"
 	"net"
 
 	"google.golang.org/grpc"
@@ -12,15 +13,26 @@ import (
 	pb "github.com/naiba/nezha/proto"
 	rpcService "github.com/naiba/nezha/service/rpc"
 	"github.com/naiba/nezha/service/singleton"
+ "github.com/naiba/nezha/service/upgradecontrol"
 )
 
 func ServeRPC(port uint) {
 	server := grpc.NewServer()
 	rpcService.NezhaHandlerSingleton = rpcService.NewNezhaHandler()
 	pb.RegisterNezhaServiceServer(server, rpcService.NezhaHandlerSingleton)
- // Fail closed until explicit production scheduler provisioning exists.
- wire.Register(server,&upgrade.RPC{})
-	listen, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+ endpoint:=fmt.Sprintf(":%d",port)
+ handler:=&upgrade.RPC{}
+ if c:=upgradecontrol.Current;c!=nil{
+  // A configured managed upgrade deployment requires local TLS termination.
+  endpoint=fmt.Sprintf("127.0.0.1:%d",port)
+  handler=&upgrade.RPC{Scheduler:c.Scheduler,AllowExecution:c.Execution,AllowLoopbackProxy:true,Authenticate:func(ctx context.Context)(uint64,error){
+   id,err:=rpcService.NezhaHandlerSingleton.Auth.Check(ctx)
+   if err!=nil||!c.AgentAllowed(id){return 0,fmt.Errorf("managed Agent denied")}
+   return id,nil
+  }}
+ }
+ wire.Register(server,handler)
+ listen, err := net.Listen("tcp",endpoint)
 	if err != nil {
 		panic(err)
 	}

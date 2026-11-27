@@ -51,6 +51,18 @@ func(p *Packages) Import(ctx context.Context,src io.Reader)(core.VerifiedPackage
  default:return zero,errors.New("package upload already in progress")
  }
  if err:=ctx.Err();err!=nil{return zero,err}
+ // Bound all stored bytes, including abandoned temporary files. Reserve
+ // one maximum-size upload before writing; operator cleans old releases.
+ entries,err:=os.ReadDir(p.dir)
+ if err!=nil{return zero,err}
+ if len(entries)>=128{return zero,errors.New("package store entry quota exhausted")}
+ var used int64
+ for _,e:=range entries{
+  info,err:=e.Info()
+  if err!=nil||!info.Mode().IsRegular()||info.Size()<0||info.Size()>2<<30{return zero,errors.New("invalid package directory entry")}
+  used+=info.Size()
+  if used>(2<<30)-core.MaxPackageSize{return zero,errors.New("package store byte quota exhausted")}
+ }
  f,err:=os.CreateTemp(p.dir,".upload-")
  if err!=nil{return zero,err}
  defer os.Remove(f.Name())

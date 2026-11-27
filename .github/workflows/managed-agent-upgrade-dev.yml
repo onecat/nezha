@@ -45,5 +45,6 @@ jobs:
       - name: Verify real SQLite task persistence
         run: |
           go test -race -count=1 -v ./service/agentupgrade
-          go vet ./service/agentupgrade
+          go vet ./service/agentupgrade ./service/upgradecontrol
+          go test -count=1 ./cmd/dashboard/controller ./service/upgradecontrol
           go build ./cmd/dashboard

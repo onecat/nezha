@@ -17,6 +17,7 @@ func TestDashboardUpgradeEntryFailClosed(t *testing.T) {
   t.Fatal("missing disabled upgrade entry and legacy migration notice")
  }
  start:=strings.Index(s,"aria-label=\"升级 Agent（尚未开放）\"")
+ if !strings.Contains(s,"{{if .ManagedUpgradeEnabled}}")||!strings.Contains(s,"{{else}}")||strings.Index(s,"升级 Agent")>strings.Index(s,"onclick=\"batchEditServerGroup()\""){t.Fatal("upgrade toolbar guard or placement missing")}
  if start<0 { t.Fatal("upgrade entry label missing") }
  prefix:=s[:start]
  pos:=strings.LastIndex(prefix,"<button")

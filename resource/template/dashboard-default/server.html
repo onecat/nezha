@@ -5,6 +5,11 @@
     <div class="ui container">
         <div class="ui grid">
             <div class="right floated right aligned twelve wide column">
+                {{if .ManagedUpgradeEnabled}}
+                <button type="button" class="ui right labeled nezha-primary-btn icon button" onclick="managedUpgrade()"><i class="arrow alternate circle up outline icon"></i> 升级 Agent</button>
+                {{else}}
+                <button type="button" class="ui disabled button" disabled title="升级 Agent：旧版 v0.20.5 需要手动迁移" aria-label="升级 Agent（尚未开放）">升级 Agent</button>
+                {{end}}
                 <button class="ui right labeled nezha-primary-btn icon button" onclick="batchEditServerGroup()"><i
                         class="edit icon"></i> {{tr "BatchEditServerGroup"}}
                 </button>
@@ -67,14 +72,6 @@
                     </td>
                     <td>
                         <div class="ui mini icon buttons">
-                            {{/* Fail closed: do not expose an upgrade action until authenticated API,
-                                 Agent capability negotiation and rollback are end-to-end verified.
-                                 v0.20.5 requires manual migration. */}}
-                            <button type="button" class="ui disabled button" disabled
-                                title="升级 Agent：集中升级尚未开放；旧版 v0.20.5 需要手动迁移"
-                                aria-label="升级 Agent（尚未开放）">
-                                <i class="arrow alternate circle up outline icon"></i> 升级 Agent
-                            </button>
                             <button class="ui button" onclick="connectToServer({{$server.ID}})">
                                 <i class="terminal icon"></i>
                             </button>
@@ -104,6 +101,37 @@
             cb.checked = true
         })
     }
+    {{if .ManagedUpgradeEnabled}}
+    async function managedUpgrade() {
+        const servers = Array.from(checkBoxList).filter(cb=>cb.checked).map(cb=>Number(cb.value));
+        if (!servers.length || servers.length>3 || servers.some(id=>!Number.isSafeInteger(id)||id<1)) { alert('请选择 1–3 台服务器'); return; }
+        const digest=prompt('输入已导入升级包的 SHA256（留空选择上传文件）');
+        if(digest===null)return;
+        let hash=digest.trim();
+        try {
+            if(!hash){
+                const picker=document.createElement('input');picker.type='file';picker.accept='.nzu';
+                picker.onchange=async()=>{
+                    try{
+                        const f=picker.files[0];if(!f)return;
+                        const r=await fetch('/api/managed-upgrade/package',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:f});
+                        if(!r.ok)throw Error('导入失败');
+                        const p=await r.json();alert('导入成功。请重新点击升级并输入 SHA256：'+p.PackageSHA256);
+                    }catch(e){alert(e.message);}
+                };picker.click();return;
+            }
+            if(!/^[a-f0-9]{64}$/.test(hash)){alert('SHA256 格式错误');return;}
+            const canary=prompt('已成功的灰度任务 ID（首次单台测试留空）');
+            if(canary===null)return;
+            if(servers.length>1&&!canary.trim()){alert('批量升级需要成功的灰度任务');return;}
+            if(!confirm('确认创建升级任务？服务器：'+servers.join(', ')+'\nSHA256：'+hash))return;
+            const res=await fetch('/api/managed-upgrade/wave',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({servers,digest:hash,canary:canary.trim()})});
+            const data=await res.json();
+            const ids=(data.tasks||[]).map(x=>x.Task.ID);
+            alert((res.ok?'任务已创建':'部分或全部任务未创建')+'\n任务 ID：'+ids.join(', ')+'\n状态接口：/api/managed-upgrade/status/<任务ID>');
+        }catch(e){alert('升级请求失败，请核对任务状态后再试');}
+    }
+    {{end}}
     function batchEditServerGroup() {
         let groupName = prompt('{{tr "InputServerGroupName"}}')
         if (groupName === null) {

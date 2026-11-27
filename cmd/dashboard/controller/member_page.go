@@ -7,6 +7,7 @@ import (
 	"github.com/naiba/nezha/model"
 	"github.com/naiba/nezha/pkg/mygin"
 	"github.com/naiba/nezha/service/singleton"
+ "github.com/naiba/nezha/service/upgradecontrol"
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 )
 
@@ -43,11 +44,14 @@ func (mp *memberPage) api(c *gin.Context) {
 }
 
 func (mp *memberPage) server(c *gin.Context) {
+ _,operatorOK:=upgradeOperator(c)
+ upgradeEnabled:=operatorOK&&upgradecontrol.Current!=nil&&upgradecontrol.Current.Execution
 	singleton.SortedServerLock.RLock()
 	defer singleton.SortedServerLock.RUnlock()
 	c.HTML(http.StatusOK, "dashboard-"+singleton.Conf.Site.DashboardTheme+"/server", mygin.CommonEnvironment(c, gin.H{
 		"Title":   singleton.Localizer.MustLocalize(&i18n.LocalizeConfig{MessageID: "ServersManagement"}),
 		"Servers": singleton.SortedServerList,
+ "ManagedUpgradeEnabled":upgradeEnabled,
 	}))
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/naiba/nezha/model"
 	"github.com/naiba/nezha/proto"
 	"github.com/naiba/nezha/service/singleton"
+ "github.com/naiba/nezha/service/upgradecontrol"
 	"github.com/ory/graceful"
 	flag "github.com/spf13/pflag"
 )
@@ -62,6 +63,10 @@ func main() {
 	singleton.InitDBFromPath(dashboardCliParam.DatebaseLocation)
 	singleton.InitLocalizer()
 	initSystem()
+ upgradeCtx,cancelUpgrade:=context.WithTimeout(context.Background(),30*time.Second)
+ control,upgradeErr:=upgradecontrol.Load(upgradeCtx,os.Getenv("NZ_MANAGED_UPGRADE_CONFIG"))
+ cancelUpgrade()
+ if upgradeErr!=nil{log.Print("managed Agent upgrades disabled: invalid provisioning")}else{upgradecontrol.Current=control}
 
 	// TODO 使用 cmux 在同一端口服务 HTTP 和 gRPC
 	singleton.CleanMonitorHistory()
