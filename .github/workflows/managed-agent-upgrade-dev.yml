@@ -91,3 +91,40 @@ jobs:
           done
       - name: Actual Dashboard and Supervisor over TLS
         run: python3 script/managed-upgrade-joint.py "$RUNNER_TEMP/joint-bin" "$(go env GOARCH)"
+
+  security-regression:
+    if: github.ref_name == 'agent-upgrade-v0.30.06'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CGO_ENABLED: '1'
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=readonly
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Vendor pinned frontend assets
+        run: python3 script/vendor-assets.py
+      - name: Verify module integrity and lock
+        run: |
+          go mod verify
+          go mod tidy -diff
+      - name: Full regression and vet
+        run: |
+          go test ./...
+          go vet ./...
+          go test -race ./...
+      - name: Reachable Go vulnerability scan
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: Frontend advisory disposition
+        run: |
+          python3 script/audit-frontend.py || test -s frontend-audit.json
+          python3 script/check-frontend-disposition.py

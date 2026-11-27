@@ -45,6 +45,8 @@ def run():
     with tempfile.TemporaryDirectory(prefix="nezha-joint-") as d:
         work = pathlib.Path(d)
         children = []
+        supervisors = {}
+        observed = {}
         def start(name, args, env=None):
             with (work / (name+".log")).open("ab") as log:
                 p = subprocess.Popen([str(x) for x in args], cwd=work,
@@ -76,7 +78,10 @@ pid nginx.pid;
 error_log nginx-error.log;
 events { worker_connections 128; }
 http {
-  access_log off;
+  # The legacy Agent authenticates using client_secret (gRPC metadata).
+  underscores_in_headers on;
+  log_format joint '$server_port $status $upstream_status $upstream_trailer_grpc_status';
+  access_log joint-status.log joint;
   client_body_temp_path client;
   proxy_temp_path proxy;
   fastcgi_temp_path fastcgi;
@@ -107,6 +112,7 @@ http {
   }
 }
 """)
+            subprocess.run(["nginx","-t","-p",str(work)+"/","-c",str(work/"nginx.conf")],check=True,cwd=work)
             proxy = start("proxy", ["nginx","-p",str(work)+"/","-c",str(work/"nginx.conf"),"-g","daemon off;"])
             tls = ssl.create_default_context(cafile=str(work/"tls.pem"))
             def browser():
@@ -181,10 +187,16 @@ http {
                 config(root/"agent.json",{"server":"127.0.0.1:15443","client_secret":secret,"ca_file":str(work/"tls.pem"),"enable_ip_query":False,"report_interval_seconds":1})
                 config(root/"supervisor.json",{"enabled":True,"server_id":sid,"initial_sequence":1,"initial_version":"v0.30.00","agent_config":str(root/"agent.json"),"install_dir":str(root/"install"),"state_dir":str(root/"state"),"stage_dir":str(root/"stage"),"keys":{"ci":pub}})
                 subprocess.run([str(BIN/"supervisor"),"--config",str(root/"supervisor.json"),"--initialize"],check=True,cwd=work)
-                start(f"supervisor-{sid}",[BIN/"supervisor","--config",root/"supervisor.json"])
+                supervisors[sid] = start(f"supervisor-{sid}",[BIN/"supervisor","--config",root/"supervisor.json"])
             def version(sid,v):
                 result=getjson("/api/v1/server/details?id="+str(sid))["result"]
-                return bool(result and result[0].get("last_active") and result[0].get("host",{}).get("Version")==v)
+                row = result[0] if result else {}
+                host = row.get("host") or {}
+                recent = 0 < time.time()-row.get("last_active",0) < 90
+                observed[sid] = {"expected_version":v,"version_matches":host.get("Version")==v,"recent_report":recent,"has_state":bool(row.get("status"))}
+                if supervisors[sid].poll() is not None:
+                    raise RuntimeError(f"supervisor {sid} exited with {supervisors[sid].returncode}")
+                return recent and host.get("Version")==v and bool(row.get("status"))
             wait("All initial Agent reports",lambda:all(version(sid,"v0.30.00") for sid,_ in targets),120)
             def package(version_label,actual,sequence,minimum):
                 path=work/(version_label+".nzu")
@@ -221,6 +233,17 @@ http {
             wait("Wrong-version signed binary rolls back",lambda:result(rollback,ids[0],"rolled_back","v0.30.01",3))
             request("/api/managed-upgrade/wave",{"servers":ids[:1],"digest":bad,"canary":""},expected=409)
             print("Native joint managed upgrade passed: "+ARCH,flush=True)
+        except Exception:
+            # Report only bounded non-secret diagnostic fields. Never print
+            # raw HTTP headers, body, credentials, or full process logs.
+            print("Observed Agent status:",json.dumps(observed),flush=True)
+            print("Supervisor exit codes:",{sid:p.poll() for sid,p in supervisors.items()},flush=True)
+            log = work/"joint-status.log"
+            if log.exists():
+                from collections import Counter
+                counts=Counter(line.strip() for line in log.read_text(errors="replace").splitlines() if re.fullmatch(r"[0-9 -]+",line.strip()))
+                print("Proxy port/HTTP/upstream/gRPC status counts:",dict(counts),flush=True)
+            raise
         finally:
             for p in reversed(children):
                 stop(p)
