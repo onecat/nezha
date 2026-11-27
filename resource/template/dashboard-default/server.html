@@ -61,7 +61,7 @@
                     <td>
                         {{with index $.AgentInstallCommands $server.ID}}
                         <button class="ui icon green mini button" data-agent-install-id="{{$server.ID}}" data-agent-installer-sha256="{{$.AgentInstallerDigest}}" data-clipboard-text="{{.}}" data-tooltip="复制 Linux amd64 一键安装 / 重装命令（root）"><i class="terminal icon"></i></button>
-                        {{else}}<button class="ui icon disabled mini button" disabled title="需要 HTTPS 和自动升级模式，并配置 Agent 连接域名"><i class="terminal icon"></i></button>{{end}}
+                        {{else}}<button class="ui icon disabled mini button" disabled title="需要已验证 Agent Release、HTTPS 自动升级模式和 Agent 域名"><i class="terminal icon"></i></button>{{end}}
                     </td>
                     <td>
                         {{if $server.Note}}

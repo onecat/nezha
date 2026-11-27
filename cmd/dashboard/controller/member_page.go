@@ -47,14 +47,13 @@ func (mp *memberPage) server(c *gin.Context) {
  _,operatorOK:=upgradeOperator(c)
  upgradeVisible:=operatorOK&&upgradecontrol.Current!=nil
  upgradeEnabled:=upgradeVisible&&upgradecontrol.Current.Execution
- origin,originOK:=installerOrigin(c.Request.Host)
- installEnabled:=originOK&&upgradeEnabled&&upgradecontrol.Current.Automatic()&&singleton.Conf.TLS
+ installEnabled:=agentInstallerDigest()!=""&&upgradeEnabled&&upgradecontrol.Current.Automatic()&&singleton.Conf.TLS
  commands:=map[uint64]string{}
 	singleton.SortedServerLock.RLock()
 	defer singleton.SortedServerLock.RUnlock()
  if installEnabled {
   port:=singleton.Conf.ProxyGRPCPort;if port==0{port=singleton.Conf.GRPCPort}
-  for _,s:=range singleton.SortedServerList{commands[s.ID]=agentInstallCommand(origin,singleton.Conf.GRPCHost,port,s.Secret)}
+  for _,s:=range singleton.SortedServerList{commands[s.ID]=agentInstallCommand(singleton.Conf.GRPCHost,port,s.Secret)}
  }
 	c.HTML(http.StatusOK, "dashboard-"+singleton.Conf.Site.DashboardTheme+"/server", mygin.CommonEnvironment(c, gin.H{
 		"Title":   singleton.Localizer.MustLocalize(&i18n.LocalizeConfig{MessageID: "ServersManagement"}),

@@ -26,7 +26,7 @@ var releaseVersion=regexp.MustCompile(`^v[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}$`)
 func parseRelease(raw string)(string,error){
  if !strings.HasPrefix(raw,releasePrefix){return "",errors.New("only the configured independent Agent repository is accepted")}
  parts:=strings.Split(strings.TrimPrefix(raw,releasePrefix),"/")
- if len(parts)!=2||!releaseVersion.MatchString(parts[0])||parts[1]!=binaryName{return "",errors.New("expected a versioned raw Linux amd64 Agent binary URL")}
+ if len(parts)!=2||!releaseVersion.MatchString(parts[0])||(parts[1]!=binaryName&&parts[1]!="nezha-agent"){return "",errors.New("expected a versioned raw Linux amd64 Agent binary URL")}
  return parts[0],nil
 }
 func releaseHost(u *url.URL)bool{
@@ -48,11 +48,11 @@ func fetch(ctx context.Context,client *http.Client,raw string,limit int64,dst io
  n,err:=io.Copy(dst,io.LimitReader(resp.Body,limit+1));if err!=nil||n==0||n>limit{return 0,errors.New("invalid release size")}
  return n,nil
 }
-func checksum(data string)(string,error){
+func checksum(data string,name string)(string,error){
  var found string
  for _,line:=range strings.Split(data,"\n"){
   fields:=strings.Fields(line)
-  if len(fields)!=2||strings.TrimPrefix(fields[1],"*")!=binaryName{continue}
+  if len(fields)!=2||strings.TrimPrefix(fields[1],"*")!=name{continue}
   if found!=""{return "",errors.New("duplicate release checksum")}
   b,err:=hex.DecodeString(fields[0]);if err!=nil||len(b)!=32||hex.EncodeToString(b)!=fields[0]{return "",errors.New("invalid release checksum")}
   found=fields[0]
@@ -78,7 +78,8 @@ func(c *Control)UpgradeURL(ctx context.Context,operator uint64,servers []uint64,
  client:=releaseClient();defer client.CloseIdleConnections()
  var sums strings.Builder
  if _,err:=fetch(ctx,client,releasePrefix+version+"/SHA256SUMS",64<<10,&sums);err!=nil{return nil,err}
- want,err:=checksum(sums.String());if err!=nil{return nil,err}
+ asset:=raw[strings.LastIndex(raw,"/")+1:]
+ want,err:=checksum(sums.String(),asset);if err!=nil{return nil,err}
  binary,err:=os.CreateTemp(c.automatic.dir,".binary-");if err!=nil{return nil,err};defer os.Remove(binary.Name());defer binary.Close()
  digest:=sha256.New()
  size,err:=fetch(ctx,client,raw,core.MaxPackageSize-65536,io.MultiWriter(binary,digest));if err!=nil{return nil,err}

@@ -44,7 +44,6 @@ func ServeWeb(port uint) *http.Server {
 	r.SetHTMLTemplate(tmpl)
 	r.Use(mygin.RecordPath)
 	r.StaticFS("/static", http.FS(resource.StaticFS))
- r.GET("/agent-install.sh",serveAgentInstaller)
 	routers(r)
 	page404 := func(c *gin.Context) {
 		mygin.ShowErrorPage(c, mygin.ErrInfo{

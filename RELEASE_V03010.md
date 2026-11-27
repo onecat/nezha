@@ -1,0 +1,7 @@
+# Dashboard v0.30.10
+
+Single-binary Agent v0.30.03 integration. The clipboard command downloads only the independent Agent binary, validates the build-pinned SHA256, and invokes its native service install command as root. No Python3, separate shell installer, or Supervisor binary is required on target machines. curl, sha256sum, chmod, mktemp, a shell to paste the command, systemd and useradd remain prerequisites. Private CA may be supplied using NZ_AGENT_CA_FILE.
+
+The Dashboard no longer serves agent-install.sh. Existing URL upgrade supports both the historic nezha-agent-linux-amd64 and new nezha-agent release filenames with matching checksum entries. TLS, admin authorization, signatures, monotonic state, real binary validation and rollback remain. New service uses official v0 path and name. Prior separately managed Supervisor layouts require explicit ledger-preserving migration; existing direct installations repair the exact installed version. Historical managed protocol remains tested.
+
+Release pipeline waits for the exact Agent tag and verifies the published binary before embedding its SHA256. Native Linux amd64 integration tests exercise the actual copied install command, legacy directory backup, systemd direct main process, repeated install, self-upgrade, failed-exec rollback and durable receipt. No upstream update services. Dashboard publishes only nezha-app and SHA256SUMS.

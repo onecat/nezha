@@ -198,10 +198,10 @@ http {
                     row=getjson("/api/v1/server/details?id="+str(sid))["result"][0]
                     return (row.get("host") or {}).get("Version")==v and bool(row.get("status"))
                 wait("URL enrolled Agent reports",lambda:reports("v0.30.00"),120)
-                url="https://github.com/onecat/nezha-agent/releases/download/v0.30.02/nezha-agent-linux-amd64"
+                url="https://github.com/onecat/nezha-agent/releases/download/v0.30.03/nezha-agent"
                 request("/api/managed-upgrade/url",{"servers":[sid],"url":url},origin="https://invalid.example",expected=403)
                 task=getjson("/api/managed-upgrade/url",data={"servers":[sid],"url":url})["tasks"][0]["Task"]["ID"]
-                wait("URL actual binary upgrade",lambda:getjson("/api/managed-upgrade/status/"+task)["Task"]["State"]=="succeeded" and reports("v0.30.02"),180)
+                wait("URL actual binary upgrade",lambda:getjson("/api/managed-upgrade/status/"+task)["Task"]["State"]=="succeeded" and reports("v0.30.03"),180)
                 stop(dashboard)
                 dashboard=start("url-reopened",args,env)
                 client=browser()
@@ -231,23 +231,16 @@ http {
                     digest=button.get("data-agent-installer-sha256","")
                     if not re.fullmatch(r"[0-9a-f]{64}",digest):
                         raise RuntimeError("installer button digest missing or invalid")
-                    installer=request("/agent-install.sh?sha256="+digest,session=browser())
-                    actual=hashlib.sha256(installer).hexdigest()
-                    if actual!=digest:
-                        raise RuntimeError("served installer digest mismatch: expected "+digest+" actual "+actual)
-                    if not installer.startswith(b"#!/usr/bin/env bash"):
-                        raise RuntimeError("installer response is not a bash script")
                     tokens=shlex.split(command[:-1]) if command.endswith(")") else []
-                    if digest not in tokens:
-                        raise RuntimeError("clipboard command missing embedded script checksum")
-                    if BASE+"/agent-install.sh?sha256="+digest not in tokens:
-                        raise RuntimeError("clipboard command missing exact version-bound HTTPS script URL")
+                    url="https://github.com/onecat/nezha-agent/releases/download/v0.30.03/nezha-agent"
+                    if digest not in tokens or url not in tokens or "service" not in tokens or "install" not in tokens:
+                        raise RuntimeError("clipboard command missing verified binary install")
                     if install_secret not in tokens or "127.0.0.1:15443" not in tokens:
                         raise RuntimeError("clipboard command has wrong selected identity or endpoint")
-                    if any(b.get("data-clipboard-text","").startswith("./nezha-agent -s ") for b in parser.buttons):
-                        raise RuntimeError("obsolete Agent clipboard command still present")
-                    request("/agent-install.sh?sha256="+"0"*64,expected=409,session=browser())
-                    print("Clipboard command, selected identity and exact embedded script checksum: passed",flush=True)
+                    if any("agent-install.sh" in b.get("data-clipboard-text","") or b.get("data-clipboard-text","").startswith("./nezha-agent -s ") for b in parser.buttons):
+                        raise RuntimeError("obsolete installer command still present")
+                    request("/agent-install.sh",expected=404,session=browser())
+                    print("Clipboard command and selected binary identity passed",flush=True)
                     # Real systemd migration on the disposable native CI runner.
                     opt=pathlib.Path("/opt")
                     base_dir=opt/"nezha"
@@ -278,10 +271,9 @@ http {
                         sudo("install","-m","0644",legacy_unit,"/etc/systemd/system/nezha-agent.service",check=True)
                         sudo("systemctl","daemon-reload",check=True)
                         sudo("systemctl","enable","--now","nezha-agent.service",check=True)
-                        bundle=work/"combined-ca.pem"
-                        bundle.write_bytes(pathlib.Path("/etc/ssl/certs/ca-certificates.crt").read_bytes()+b"\n"+(work/"tls.pem").read_bytes())
+
                         def copied_install():
-                            p=sudo("env","CURL_CA_BUNDLE="+str(bundle),"NZ_AGENT_CA_FILE="+str(work/"tls.pem"),"bash","-s",input=command+"\n",text=True,timeout=360)
+                            p=sudo("env","NZ_AGENT_CA_FILE="+str(work/"tls.pem"),"sh","-s",input=command+"\n",text=True,timeout=360)
                             if p.returncode!=0:
                                 sudo("systemctl","show","-p","ActiveState","-p","SubState","-p","Result","-p","ExecMainStatus","nezha-agent.service")
                                 sudo("journalctl","-u","nezha-agent.service","-n","25","--no-pager")
@@ -289,19 +281,22 @@ http {
                         copied_install()
                         def installed_report():
                             row=getjson("/api/v1/server/details?id="+str(install_sid))["result"][0]
-                            return (row.get("host") or {}).get("Version")=="v0.30.02" and bool(row.get("status"))
+                            return (row.get("host") or {}).get("Version")=="v0.30.03" and bool(row.get("status"))
                         wait("Installed service accepted reports",installed_report,90)
                         sudo("systemctl","is-enabled","--quiet","nezha-agent.service",check=True)
                         sudo("systemctl","is-active","--quiet","nezha-agent.service",check=True)
-                        if not pathlib.Path("/opt/nezha/agent/nezha-agent").is_symlink():
-                            raise RuntimeError("legacy executable path missing")
-                        ledger_path="/opt/nezha/agent/managed/state/upgrade-state.json"
+                        if pathlib.Path("/opt/nezha/agent/nezha-agent").is_symlink():
+                            raise RuntimeError("single binary must be the actual executable")
+                        mainpid=sudo("systemctl","show","-p","MainPID","--value","nezha-agent.service",check=True,stdout=subprocess.PIPE,text=True).stdout.strip()
+                        if sudo("readlink","/proc/"+mainpid+"/exe",check=True,stdout=subprocess.PIPE,text=True).stdout.strip()!="/opt/nezha/agent/nezha-agent":
+                            raise RuntimeError("systemd is not directly running Agent")
+                        ledger_path="/opt/nezha/agent/.state/upgrade-state.json"
                         ledger=sudo("cat",ledger_path,check=True,stdout=subprocess.PIPE).stdout
                         if json.loads(ledger)["server_id"]!=install_sid:
                             raise RuntimeError("installer enrollment identity mismatch")
-                        saved_config_path="/opt/nezha/agent/managed/agent.json"
+                        saved_config_path="/opt/nezha/agent/agent.json"
                         saved_config=sudo("cat",saved_config_path,check=True,stdout=subprocess.PIPE).stdout
-                        saved_supervisor=sudo("cat","/opt/nezha/agent/managed/supervisor.json",check=True,stdout=subprocess.PIPE).stdout
+                        saved_supervisor=sudo("cat","/opt/nezha/agent/.state/identity.json",check=True,stdout=subprocess.PIPE).stdout
                         marker_paths=sudo("find","/opt/nezha","-maxdepth","3","-name","legacy-marker","-type","f",check=True,stdout=subprocess.PIPE,text=True).stdout.splitlines()
                         if len(marker_paths)!=1 or "/.agent-backup-" not in marker_paths[0] or sudo("cat",marker_paths[0],check=True,stdout=subprocess.PIPE).stdout!=b"legacy installation":
                             raise RuntimeError("legacy directory backup missing or changed")
@@ -309,13 +304,57 @@ http {
                         copied_install()
                         if sudo("cat",ledger_path,check=True,stdout=subprocess.PIPE).stdout!=ledger:
                             raise RuntimeError("reinstall changed durable ledger")
-                        if sudo("cat",saved_config_path,check=True,stdout=subprocess.PIPE).stdout!=saved_config or sudo("cat","/opt/nezha/agent/managed/supervisor.json",check=True,stdout=subprocess.PIPE).stdout!=saved_supervisor:
+                        if sudo("cat",saved_config_path,check=True,stdout=subprocess.PIPE).stdout!=saved_config or sudo("cat","/opt/nezha/agent/.state/identity.json",check=True,stdout=subprocess.PIPE).stdout!=saved_supervisor:
                             raise RuntimeError("reinstall changed Agent configuration or pinned identity")
                         def fresh_reinstall_report():
                             row=getjson("/api/v1/server/details?id="+str(install_sid))["result"][0]
-                            return (row.get("host") or {}).get("Version")=="v0.30.02" and bool(row.get("status")) and row.get("last_active",0)>before_report
+                            return (row.get("host") or {}).get("Version")=="v0.30.03" and bool(row.get("status")) and row.get("last_active",0)>before_report
                         wait("Reinstalled service accepted fresh reports",fresh_reinstall_report,90)
                         print("Systemd legacy migration and state-preserving reinstall passed",flush=True)
+                        # New single-binary service upgrades without a resident
+                        # supervisor. A development build of this exact source
+                        # labelled .02 is used only as the previous-version fixture.
+                        sudo("systemctl","disable","--now","nezha-agent.service",check=True)
+                        sudo("rm","-rf","--","/opt/nezha/agent",check=True)
+                        sudo("rm","-f","/etc/systemd/system/nezha-agent.service",check=True)
+                        sudo("systemctl","daemon-reload",check=True)
+                        direct_sid,direct_secret=targets[2]
+                        bootstrap=work/"direct-agent-old"
+                        shutil.copyfile(BIN/"agent-v0.30.02",bootstrap)
+                        bootstrap.chmod(0o700)
+                        sudo(bootstrap,"service","install","--server","127.0.0.1:15443","--ca-file",work/"tls.pem",input=direct_secret+"\n",text=True,timeout=180,check=True)
+                        def direct_reports(v):
+                            row=getjson("/api/v1/server/details?id="+str(direct_sid))["result"][0]
+                            return (row.get("host") or {}).get("Version")==v and bool(row.get("status"))
+                        wait("Direct old Agent reports",lambda:direct_reports("v0.30.02"),90)
+                        tid=getjson("/api/managed-upgrade/url",data={"servers":[direct_sid],"url":url})["tasks"][0]["Task"]["ID"]
+                        wait("Direct actual release self-upgrade",lambda:getjson("/api/managed-upgrade/status/"+tid)["Task"]["State"]=="succeeded" and direct_reports("v0.30.03"),180)
+                        direct_ledger=lambda:json.loads(sudo("cat",ledger_path,check=True,stdout=subprocess.PIPE).stdout)
+                        wait("Direct successful receipt persisted",lambda:direct_ledger()["result_reported"],30)
+                        seq=direct_ledger()["highest_sequence"]+1
+                        binary_digest=sudo("sha256sum","/opt/nezha/agent/nezha-agent",check=True,stdout=subprocess.PIPE,text=True).stdout.split()[0]
+                        # Ed25519 PKCS8 DER from the isolated Dashboard seed,
+                        # used only for a signed non-executable regression case.
+                        der=work/"ci-local.der"
+                        der.write_bytes(bytes.fromhex("302e020100300506032b657004220420")+seed)
+                        der.chmod(0o600)
+                        local_key=work/"ci-local.pem"
+                        subprocess.run(["openssl","pkey","-inform","DER","-in",str(der),"-out",str(local_key)],check=True)
+                        local_key.chmod(0o600)
+                        bad=work/"not-executable"
+                        bad.write_bytes(b"invalid ELF candidate")
+                        package_path=work/"direct-bad.nzu"
+                        subprocess.run([str(BIN/"agent-package"),"-binary",str(bad),"-out",str(package_path),"-key",str(local_key),"-version","v0.30.04","-min-version","v0.30.03","-os","linux","-arch","amd64","-key-id","dashboard-local","-sequence",str(seq)],check=True)
+                        data=package_path.read_bytes()
+                        imported=getjson("/api/managed-upgrade/package",data=data,kind="application/octet-stream")
+                        bad_id=getjson("/api/managed-upgrade/wave",data={"servers":[direct_sid],"digest":imported["PackageSHA256"],"canary":""})["tasks"][0]["Task"]["ID"]
+                        wait("Unexecutable candidate automatically rolled back",lambda:getjson("/api/managed-upgrade/status/"+bad_id)["Task"]["State"]=="rolled_back" and direct_reports("v0.30.03"),180)
+                        if sudo("sha256sum","/opt/nezha/agent/nezha-agent",check=True,stdout=subprocess.PIPE,text=True).stdout.split()[0]!=binary_digest:
+                            raise RuntimeError("direct rollback did not restore exact previous bytes")
+                        wait("Direct rollback receipt persisted",lambda:direct_ledger()["result_reported"],30)
+                        if direct_ledger()["highest_sequence"]!=seq:
+                            raise RuntimeError("direct rollback lowered sequence")
+                        print("Single-binary self-upgrade and failed-exec rollback passed",flush=True)
                     finally:
                         try:
                             sudo("systemctl","disable","--now","nezha-agent.service",stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
