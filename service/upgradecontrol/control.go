@@ -40,6 +40,7 @@ type Control struct{
  Execution bool
  store *upgrade.Store
  targets map[uint64]target
+ automatic *automaticControl
 }
 // Current is initialized once before starting web and RPC listeners.
 var Current *Control
@@ -95,6 +96,11 @@ func Operator(ctx context.Context,id uint64)bool{
 
 func(c *Control) targetAllowed(id uint64)(target,*model.Server,bool){
  v,ok:=c.targets[id]
+ if c.automatic!=nil {
+  var e enrolledTarget
+  if err:=singleton.DB.First(&e,"server_id = ?",id).Error;err!=nil{return target{},nil,false}
+  v=target{ID:e.ServerID,SecretSHA256:e.SecretSHA256,Arch:"amd64",InitialSequence:1};ok=true
+ }
  s:=singleton.SnapshotServer(id)
  if !ok||s==nil||s.Secret==""{return v,s,false}
  sum:=sha256.Sum256([]byte(s.Secret))

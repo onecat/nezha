@@ -66,7 +66,7 @@ func Register(s grpc.ServiceRegistrar,impl Server){
 var descriptor=grpc.ServiceDesc{
  ServiceName:Service,
  HandlerType:(*Server)(nil),
- Methods:[]grpc.MethodDesc{{MethodName:"Verify",Handler:verifyHandler},{MethodName:"Grant",Handler:grantHandler},{MethodName:"Result",Handler:resultHandler}},
+ Methods:[]grpc.MethodDesc{{MethodName:"Enroll",Handler:enrollHandler},{MethodName:"Verify",Handler:verifyHandler},{MethodName:"Grant",Handler:grantHandler},{MethodName:"Result",Handler:resultHandler}},
  Streams:[]grpc.StreamDesc{{StreamName:"Download",ServerStreams:true,Handler:downloadHandler}},
 }
 func downloadHandler(srv any,stream grpc.ServerStream)error{
@@ -133,4 +133,13 @@ func executionCall(ctx context.Context,c grpc.ClientConnInterface,t core.Transac
  if err:=c.Invoke(ctx,method,wrapperspb.Bytes(b),out,grpc.MaxCallRecvMsgSize(MaxMessage),grpc.MaxCallSendMsgSize(MaxMessage));err!=nil{return err}
  if string(out.Value)!=want{return errors.New("invalid execution acknowledgement")}
  return nil
+}
+
+type EnrollmentServer interface{Enroll(context.Context,*wrapperspb.BytesValue)(*wrapperspb.BytesValue,error)}
+func enrollHandler(srv any,ctx context.Context,decode func(any)error,i grpc.UnaryServerInterceptor)(any,error){
+ msg:=new(wrapperspb.BytesValue);if err:=decode(msg);err!=nil{return nil,err}
+ impl,ok:=srv.(EnrollmentServer);if !ok{return nil,status.Error(codes.Unimplemented,"enrollment disabled")}
+ call:=func(ctx context.Context,req any)(any,error){return impl.Enroll(ctx,req.(*wrapperspb.BytesValue))}
+ if i==nil{return call(ctx,msg)}
+ return i(ctx,msg,&grpc.UnaryServerInfo{Server:srv,FullMethod:"/"+Service+"/Enroll"},call)
 }

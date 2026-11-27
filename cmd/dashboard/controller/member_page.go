@@ -53,6 +53,7 @@ func (mp *memberPage) server(c *gin.Context) {
 		"Title":   singleton.Localizer.MustLocalize(&i18n.LocalizeConfig{MessageID: "ServersManagement"}),
 		"Servers": singleton.SortedServerList,
  "ManagedUpgradeEnabled":upgradeEnabled,
+ "URLUpgradeEnabled":upgradeEnabled&&upgradecontrol.Current.Automatic(),
  "ManagedUpgradeVisible":upgradeVisible,
 	}))
 }

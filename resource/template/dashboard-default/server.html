@@ -108,6 +108,29 @@
     async function managedUpgrade() {
         const servers = Array.from(checkBoxList).filter(cb=>cb.checked).map(cb=>Number(cb.value));
         if (!servers.length || servers.length>3 || servers.some(id=>!Number.isSafeInteger(id)||id<1)) { alert('请选择 1–3 台服务器'); return; }
+        {{if .URLUpgradeEnabled}}
+        const url=prompt('输入 Agent Linux amd64 二进制下载链接（自己的 onecat/nezha-agent Release）');
+        if(url===null||!url.trim())return;
+        if(!confirm('确认升级 '+servers.length+' 台已登记 Agent？'))return;
+        try{
+            const res=await fetch('/api/managed-upgrade/url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({servers,url:url.trim()})});
+            const data=await res.json();
+            const tasks=data.tasks||[];
+            if(!res.ok)alert(data.message||'升级任务创建失败');
+            if(tasks.length){
+                const pending=tasks.map(t=>t.Task.ID);
+                let statusText='';
+                for(let i=0;i<90;i++){
+                    const details=await Promise.all(pending.map(async id=>{const r=await fetch('/api/managed-upgrade/status/'+encodeURIComponent(id),{cache:'no-store'});if(!r.ok)throw Error('状态查询失败');return r.json();}));
+                    statusText=details.map(d=>d.Task.ServerID+': '+d.Task.State).join('\n');
+                    if(details.every(d=>['succeeded','rolled_back','failed'].includes(d.Task.State))){alert(statusText);return;}
+                    await new Promise(resolve=>setTimeout(resolve,3000));
+                }
+                alert('升级仍在处理中：'+statusText+'\n任务 ID：'+pending.join(', '));
+            }
+        }catch(e){alert('请求中断，请通过升级状态检查结果，不要重复提交');}
+        return;
+        {{else}}
         const digest=prompt('输入已导入升级包的 SHA256（留空选择上传文件）');
         if(digest===null)return;
         let hash=digest.trim();
@@ -133,6 +156,7 @@
             const ids=(data.tasks||[]).map(x=>x.Task.ID);
             alert((res.ok?'任务已创建':'部分或全部任务未创建')+'\n任务 ID：'+ids.join(', ')+'\n状态接口：/api/managed-upgrade/status/<任务ID>');
         }catch(e){alert('升级请求失败，请核对任务状态后再试');}
+        {{end}}
     }
     {{end}}
     {{if .ManagedUpgradeVisible}}

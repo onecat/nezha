@@ -36,6 +36,7 @@ func (ma *memberAPI) serve() {
 	}))
 
 	mr.Use(requireSameOriginMutation)
+ mr.POST("/managed-upgrade/url",ma.upgradeURL)
  mr.POST("/managed-upgrade/package",ma.uploadUpgrade)
  mr.POST("/managed-upgrade/wave",ma.admitUpgradeWave)
  mr.GET("/managed-upgrade/status/:task",ma.upgradeStatus)

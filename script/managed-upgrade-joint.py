@@ -147,6 +147,8 @@ http {
             args=[BIN/"dashboard","-c",work/"dashboard.yaml","--db",work/"dashboard.db"]
             env=dict(os.environ)
             env.pop("NZ_MANAGED_UPGRADE_CONFIG",None)
+            url_mode=os.environ.get("NZ_JOINT_URL")=="1"
+            if not url_mode: env["NZ_DISABLE_URL_UPGRADE"]="1"
             dashboard=start("dashboard",args,env)
             def up():
                 try:
@@ -166,7 +168,7 @@ http {
                 return ready
             wait("Explicit loopback listeners",loopback_listeners,30)
             login()
-            request("/api/managed-upgrade/wave",{"servers":[1],"digest":"a"*64},expected=503)
+            if not url_mode: request("/api/managed-upgrade/wave",{"servers":[1],"digest":"a"*64},expected=503)
             targets=[]
             for i in range(3):
                 name=f"joint-agent-{i}"
@@ -175,6 +177,34 @@ http {
                 listing=getjson("/api/v1/server/list")["result"]
                 sid=next(row["id"] for row in listing if row["name"]==name)
                 targets.append((sid,secret))
+            if url_mode:
+                sid,secret=targets[0]
+                root=work/"url-agent"
+                root.mkdir(mode=0o700)
+                for name in ("install","state","stage","config"):
+                    (root/name).mkdir(mode=0o700)
+                shutil.copyfile(BIN/"agent-v0.30.00",root/"install/nezha-agent")
+                (root/"install/nezha-agent").chmod(0o700)
+                config(root/"config/agent.json",{"server":"127.0.0.1:15443","client_secret":secret,"ca_file":str(work/"tls.pem"),"enable_ip_query":False,"report_interval_seconds":1})
+                subprocess.run([str(BIN/"supervisor"),"--enroll","--config",str(root/"config/supervisor.json"),"--agent-config",str(root/"config/agent.json"),"--root",str(root)],check=True,cwd=work)
+                supervisors[sid]=start("url-supervisor",[BIN/"supervisor","--config",root/"config/supervisor.json"])
+                def reports(v):
+                    row=getjson("/api/v1/server/details?id="+str(sid))["result"][0]
+                    return (row.get("host") or {}).get("Version")==v and bool(row.get("status"))
+                wait("URL enrolled Agent reports",lambda:reports("v0.30.00"),120)
+                url="https://github.com/onecat/nezha-agent/releases/download/v0.30.01/nezha-agent-linux-amd64"
+                request("/api/managed-upgrade/url",{"servers":[sid],"url":url},origin="https://invalid.example",expected=403)
+                task=getjson("/api/managed-upgrade/url",data={"servers":[sid],"url":url})["tasks"][0]["Task"]["ID"]
+                wait("URL actual binary upgrade",lambda:getjson("/api/managed-upgrade/status/"+task)["Task"]["State"]=="succeeded" and reports("v0.30.01"),180)
+                stop(dashboard)
+                dashboard=start("url-reopened",args,env)
+                client=browser()
+                wait("URL Dashboard restart",up,60)
+                login()
+                if getjson("/api/managed-upgrade/status/"+task)["Task"]["State"]!="succeeded":
+                    raise RuntimeError("URL receipt lost after restart")
+                print("URL release, enrollment, upgrade and persisted receipt passed",flush=True)
+                return
             stop(dashboard)
             cfg={"enabled":True,"allow_execution":True,"package_dir":str(work/"packages"),"linux_amd64":ARCH=="amd64","linux_arm64":ARCH=="arm64","keys":{"ci":pub},"targets":[{"id":sid,"secret_sha256":hashlib.sha256(secret.encode()).hexdigest(),"arch":ARCH,"initial_sequence":1} for sid,secret in targets]}
             config(work/"upgrade.json",cfg)

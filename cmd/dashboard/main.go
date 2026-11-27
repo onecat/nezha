@@ -64,7 +64,9 @@ func main() {
 	singleton.InitLocalizer()
 	initSystem()
  upgradeCtx,cancelUpgrade:=context.WithTimeout(context.Background(),30*time.Second)
- control,upgradeErr:=upgradecontrol.Load(upgradeCtx,os.Getenv("NZ_MANAGED_UPGRADE_CONFIG"))
+ provisioning:=os.Getenv("NZ_MANAGED_UPGRADE_CONFIG")
+ control,upgradeErr:=upgradecontrol.Load(upgradeCtx,provisioning)
+ if provisioning=="" && os.Getenv("NZ_DISABLE_URL_UPGRADE")!="1" {control,upgradeErr=upgradecontrol.LoadAutomatic(upgradeCtx,dashboardCliParam.DatebaseLocation)}
  cancelUpgrade()
  if upgradeErr!=nil{log.Print("managed Agent upgrades disabled: invalid provisioning")}else{upgradecontrol.Current=control}
 

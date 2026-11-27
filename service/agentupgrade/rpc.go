@@ -2,6 +2,8 @@ package agentupgrade
 
 import (
  "context"
+ "crypto/ed25519"
+ "encoding/binary"
  "errors"
  "net"
  "time"
@@ -20,6 +22,7 @@ import (
 // RPC exposes the managed upgrade transport. A nil scheduler is disabled.
 type RPC struct{
  Scheduler *Scheduler
+ EnrollAgent func(context.Context)(uint64,[]byte,error)
  Authenticate func(context.Context)(uint64,error)
  // Only for a TLS-terminating local reverse proxy with protected backend.
  AllowLoopbackProxy bool
@@ -85,3 +88,14 @@ func(r *RPC) Verify(ctx context.Context,req *wrapperspb.BytesValue)(*wrapperspb.
 
 // Compile-time registration contract.
 var _ wire.Server=(*RPC)(nil)
+
+func(r *RPC) Enroll(ctx context.Context,req *wrapperspb.BytesValue)(*wrapperspb.BytesValue,error){
+ if r.Scheduler==nil||!r.AllowExecution||r.EnrollAgent==nil{return nil,status.Error(codes.Unavailable,"enrollment disabled")}
+ if req==nil||string(req.Value)!="linux/amd64"{return nil,status.Error(codes.InvalidArgument,"unsupported enrollment platform")}
+ p,ok:=peer.FromContext(ctx);if !ok{return nil,status.Error(codes.PermissionDenied,"missing transport")}
+ _,tlsOK:=p.AuthInfo.(credentials.TLSInfo)
+ if !tlsOK{addr,ok:=p.Addr.(*net.TCPAddr);if !r.AllowLoopbackProxy||!ok||!addr.IP.IsLoopback(){return nil,status.Error(codes.PermissionDenied,"protected transport required")}}
+ id,key,err:=r.EnrollAgent(ctx);if err!=nil||id==0||len(key)!=ed25519.PublicKeySize{return nil,status.Error(codes.PermissionDenied,"enrollment refused")}
+ b:=make([]byte,8+len(key));binary.BigEndian.PutUint64(b,id);copy(b[8:],key)
+ return wrapperspb.Bytes(b),nil
+}

@@ -25,7 +25,10 @@ func ServeRPC(port uint) {
  handler:=&upgrade.RPC{}
  if c:=upgradecontrol.Current;c!=nil{
   // A configured managed upgrade deployment requires local TLS termination.
-  handler=&upgrade.RPC{Scheduler:c.Scheduler,AllowExecution:c.Execution,AllowLoopbackProxy:true,Authenticate:func(ctx context.Context)(uint64,error){
+  handler=&upgrade.RPC{EnrollAgent:func(ctx context.Context)(uint64,[]byte,error){
+   id,err:=rpcService.NezhaHandlerSingleton.Auth.Check(ctx);if err!=nil{return 0,nil,err}
+   key,err:=c.Enroll(ctx,id);return id,key,err
+  },Scheduler:c.Scheduler,AllowExecution:c.Execution,AllowLoopbackProxy:true,Authenticate:func(ctx context.Context)(uint64,error){
    id,err:=rpcService.NezhaHandlerSingleton.Auth.Check(ctx)
    if err!=nil||!c.AgentAllowed(id){return 0,fmt.Errorf("managed Agent denied")}
    return id,nil
