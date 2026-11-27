@@ -7,7 +7,7 @@ Based on the released v0.30.06 and its release-asset cleanup. No Agent source ch
 - Missing browser sessions no longer generate record-not-found SQL errors. GORM logging uses parameterized SQL and suppresses routine missing-record warnings while retaining real errors and slow queries. Debug logging retains parameter placeholders. Raw SQL literals and driver-generated errors are not generically sanitized.
 - Obsolete OAuth/OIDC fields remain readable for configuration compatibility but are omitted on save; local authentication remains mandatory.
 - HTTP/2 PRI requests reaching the ordinary HTTP endpoint are a proxy/protocol mismatch; this release does not add h2c or suppress such errors.
-- Native paired tests explicitly bind both listeners to 127.0.0.1 and verify kernel listener addresses. The arm64 native test is retained; only the amd64 Dashboard binary and SHA256SUMS are packaged. No bundled Agent archives or arm64 Dashboard release attachment.
+- Native paired tests explicitly bind both listeners to 127.0.0.1 and verify kernel listener addresses. The current Dashboard CI targets Linux amd64 only; arm64 and Windows qualification jobs are no longer scheduled. Only the amd64 Dashboard binary and SHA256SUMS are packaged. No bundled Agent archives or arm64 Dashboard release attachment.
 
 ## Example
 

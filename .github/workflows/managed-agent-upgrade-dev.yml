@@ -8,11 +8,7 @@ permissions:
 jobs:
   package-verification:
     if: github.ref_name == 'config-v0.30.07'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, windows-2025]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -51,11 +47,7 @@ jobs:
 
   joint-upgrade:
     if: github.ref_name == 'config-v0.30.07'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
       GOTOOLCHAIN: local
@@ -98,7 +90,6 @@ jobs:
       - name: Actual Dashboard and Supervisor over TLS
         run: python3 script/managed-upgrade-joint.py "$RUNNER_TEMP/joint-bin" "$(go env GOARCH)"
       - name: Stage exact tested Dashboard binary
-        if: runner.arch == 'X64'
         run: |
           set -eu
           mkdir -p dist
@@ -106,7 +97,6 @@ jobs:
           test "$(dist/nezha-app -v)" = v0.30.07
           (cd dist && sha256sum nezha-app > SHA256SUMS)
       - uses: actions/upload-artifact@v4
-        if: runner.arch == 'X64'
         with:
           name: nezha-verified-linux-amd64
           path: dist/
@@ -186,7 +176,16 @@ jobs:
           test "$agent_sha" = "718ff36ee1975e05377cbd2d93e62df2309f9b88"
           test "$agent_tag" = v0.30.00
           if gh release view v0.30.07 >/dev/null 2>&1; then
-            echo "Release already exists; refusing to overwrite"
-            exit 1
+            # An already-running release from the identical program source
+            # may finish before this CI-only revision. Never overwrite it.
+            existing=$(gh api repos/onecat/nezha/git/ref/tags/v0.30.07 --jq '.object.sha')
+            case "$existing" in
+              "7430fbf572ba10c2c6beaf80865acf7693a3e9ac"|"$GITHUB_SHA") ;;
+              *) echo "Unexpected existing release tag"; exit 1 ;;
+            esac
+            assets=$(gh api repos/onecat/nezha/releases/tags/v0.30.07 --jq '.assets[].name' | sort)
+            test "$assets" = "$(printf 'SHA256SUMS\nnezha-app\n')"
+            echo "Equivalent release already published; preserving original tag and assets"
+            exit 0
           fi
           gh release create v0.30.07 release-dist/nezha-app release-dist/SHA256SUMS --target "$GITHUB_SHA" --title "Nezha v0.30.07" --notes-file RELEASE_V03007.md --latest
