@@ -199,8 +199,35 @@ http {
                     return (row.get("host") or {}).get("Version")==v and bool(row.get("status"))
                 wait("URL enrolled Agent reports",lambda:reports("v0.30.00"),120)
                 url="https://github.com/onecat/nezha-agent/releases/download/v0.30.04/nezha-agent"
-                request("/api/managed-upgrade/url",{"servers":[sid],"url":url},origin="https://invalid.example",expected=403)
-                task=getjson("/api/managed-upgrade/url",data={"servers":[sid],"url":url})["tasks"][0]["Task"]["ID"]
+                settings_path="/api/agent-install-setting"
+                if getjson(settings_path)["revision"]!=0:
+                    raise RuntimeError("unexpected compiled-in Agent selection")
+                if "data-agent-install-id=" in request("/server").decode():
+                    raise RuntimeError("installation command enabled before explicit selection")
+                request(settings_path,{"url":url},origin="https://invalid.example",expected=403)
+                saved=getjson(settings_path,data={"url":url})
+                if saved["version"]!="v0.30.04" or saved["sha256"]!="50613d83a2fc3efda73d016d2277a8f6efe851e051f4053c424efb48eb3c25bb":
+                    raise RuntimeError("verified setting differs from published release")
+                request(settings_path,{"url":"https://127.0.0.1/nezha-agent"},expected=409)
+                request(settings_path,{"url":url.replace("v0.30.04","v0.30.03")},expected=409)
+                if getjson(settings_path)!=saved:
+                    raise RuntimeError("invalid or dynamic binary replaced valid setting")
+                page=request("/server").decode()
+                if "managedUpgradeStatus()" in page or "输入 Agent Linux amd64 二进制下载链接" in page:
+                    raise RuntimeError("obsolete status or URL prompt present")
+                if "Agent 安装设置" not in request("/setting").decode():
+                    raise RuntimeError("installation setting UI missing")
+                preview=getjson("/api/managed-upgrade/preview",data={"servers":[sid,targets[1][0]]})
+                if preview["release"]!=saved or not preview["targets"][0]["eligible"] or preview["targets"][1]["eligible"]:
+                    raise RuntimeError("preview eligibility or selected release mismatch")
+                changed=getjson(settings_path,data={"url":url})
+                if changed["revision"]<=saved["revision"]:
+                    raise RuntimeError("selection revision did not advance")
+                request("/api/managed-upgrade/url",{"servers":[sid],"revision":saved["revision"]},expected=409)
+                request("/api/managed-upgrade/url",{"servers":[sid],"url":url},expected=400)
+                request("/api/managed-upgrade/url",{"servers":[sid],"revision":changed["revision"]},origin="https://invalid.example",expected=403)
+                task=getjson("/api/managed-upgrade/url",data={"servers":[sid],"revision":changed["revision"]})["tasks"][0]["Task"]["ID"]
+                print("Runtime release setting, static validation, preview and stale confirmation guard passed",flush=True)
                 wait("URL actual binary upgrade",lambda:getjson("/api/managed-upgrade/status/"+task)["Task"]["State"]=="succeeded" and reports("v0.30.04"),180)
                 stop(dashboard)
                 dashboard=start("url-reopened",args,env)
@@ -211,6 +238,12 @@ http {
                 login()
                 if getjson("/api/managed-upgrade/status/"+task)["Task"]["State"]!="succeeded":
                     raise RuntimeError("URL receipt lost after restart")
+                if getjson(settings_path)!=changed:
+                    raise RuntimeError("Agent selection lost after Dashboard restart")
+                same=getjson("/api/managed-upgrade/preview",data={"servers":[sid]})
+                if same["targets"][0]["eligible"]:
+                    raise RuntimeError("same version offered for upgrade")
+                print("Runtime selection persisted across restart; same version skipped",flush=True)
                 print("URL release, enrollment, upgrade and persisted receipt passed",flush=True)
                 if os.environ.get("NZ_JOINT_INSTALLER")=="1":
                     install_sid,install_secret=targets[1]
@@ -339,7 +372,10 @@ http {
                             row=getjson("/api/v1/server/details?id="+str(direct_sid))["result"][0]
                             return (row.get("host") or {}).get("Version")==v and bool(row.get("status"))
                         wait("Direct old Agent reports",lambda:direct_reports("v0.30.03"),90)
-                        tid=getjson("/api/managed-upgrade/url",data={"servers":[direct_sid],"url":url})["tasks"][0]["Task"]["ID"]
+                        direct_preview=getjson("/api/managed-upgrade/preview",data={"servers":[direct_sid]})
+                        if not direct_preview["targets"][0]["eligible"]:
+                            raise RuntimeError("direct old Agent not eligible")
+                        tid=getjson("/api/managed-upgrade/url",data={"servers":[direct_sid],"revision":direct_preview["release"]["revision"]})["tasks"][0]["Task"]["ID"]
                         wait("Direct actual release self-upgrade",lambda:getjson("/api/managed-upgrade/status/"+tid)["Task"]["State"]=="succeeded" and direct_reports("v0.30.04"),180)
                         direct_ledger=lambda:json.loads(sudo("cat",ledger_path,check=True,stdout=subprocess.PIPE).stdout)
                         wait("Direct successful receipt persisted",lambda:direct_ledger()["result_reported"],30)

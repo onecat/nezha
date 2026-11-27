@@ -40,7 +40,7 @@ func LoadAutomatic(ctx context.Context,dbPath string)(*Control,error){
  packages:=filepath.Join(root,"packages")
  if err:=privateDir(packages);err!=nil{return nil,err}
  key,err:=localSigningKey(root);if err!=nil{return nil,err}
- if err:=singleton.DB.WithContext(ctx).AutoMigrate(&enrolledTarget{});err!=nil{return nil,err}
+ if err:=singleton.DB.WithContext(ctx).AutoMigrate(&enrolledTarget{}, &ReleaseSelection{});err!=nil{return nil,err}
  c:=&Control{Execution:true,automatic:&automaticControl{key:key,dir:root,gate:make(chan struct{},1)}}
  store,err:=upgrade.Open(ctx,singleton.DB);if err!=nil{return nil,err};c.store=store
  p,err:=upgrade.OpenPackages(packages,map[string]ed25519.PublicKey{"dashboard-local":key.Public().(ed25519.PublicKey)});if err!=nil{return nil,err}

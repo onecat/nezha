@@ -47,22 +47,24 @@ func (mp *memberPage) server(c *gin.Context) {
  _,operatorOK:=upgradeOperator(c)
  upgradeVisible:=operatorOK&&upgradecontrol.Current!=nil
  upgradeEnabled:=upgradeVisible&&upgradecontrol.Current.Execution
- installEnabled:=agentInstallerDigest()!=""&&upgradeEnabled&&upgradecontrol.Current.Automatic()&&singleton.Conf.TLS
+ var selection upgradecontrol.ReleaseSelection
+ if upgradeEnabled&&upgradecontrol.Current.Automatic(){selection,_=upgradecontrol.Current.Selection(c.Request.Context());upgradeEnabled=selection.Valid()}
+ installEnabled:=selection.Valid()&&upgradeEnabled&&singleton.Conf.TLS
  commands:=map[uint64]string{}
 	singleton.SortedServerLock.RLock()
 	defer singleton.SortedServerLock.RUnlock()
  if installEnabled {
   port:=singleton.Conf.ProxyGRPCPort;if port==0{port=singleton.Conf.GRPCPort}
-  for _,s:=range singleton.SortedServerList{commands[s.ID]=agentInstallCommand(singleton.Conf.GRPCHost,port,s.Secret)}
+  for _,s:=range singleton.SortedServerList{commands[s.ID]=agentInstallCommand(selection,singleton.Conf.GRPCHost,port,s.Secret)}
  }
 	c.HTML(http.StatusOK, "dashboard-"+singleton.Conf.Site.DashboardTheme+"/server", mygin.CommonEnvironment(c, gin.H{
 		"Title":   singleton.Localizer.MustLocalize(&i18n.LocalizeConfig{MessageID: "ServersManagement"}),
 		"Servers": singleton.SortedServerList,
  "ManagedUpgradeEnabled":upgradeEnabled,
  "AgentInstallCommands":commands,
- "AgentInstallerDigest":agentInstallerDigest(),
+ "AgentInstallerDigest":selection.SHA256,
  "URLUpgradeEnabled":upgradeEnabled&&upgradecontrol.Current.Automatic(),
- "ManagedUpgradeVisible":upgradeVisible,
+ "AgentSelectionMissing":upgradeVisible&&upgradecontrol.Current.Automatic()&&!selection.Valid(),
 	}))
 }
 
@@ -115,9 +117,15 @@ func (mp *memberPage) nat(c *gin.Context) {
 }
 
 func (mp *memberPage) setting(c *gin.Context) {
+ _,operatorOK:=upgradeOperator(c)
+ agentSettings:=operatorOK&&upgradecontrol.Current!=nil&&upgradecontrol.Current.Execution&&upgradecontrol.Current.Automatic()
+ var selection upgradecontrol.ReleaseSelection
+ if agentSettings{selection,_=upgradecontrol.Current.Selection(c.Request.Context())}
 	c.HTML(http.StatusOK, "dashboard-"+singleton.Conf.Site.DashboardTheme+"/setting", mygin.CommonEnvironment(c, gin.H{
 		"Title":           singleton.Localizer.MustLocalize(&i18n.LocalizeConfig{MessageID: "Settings"}),
 		"Languages":       model.Languages,
 		"DashboardThemes": model.DashboardThemes,
+        "AgentSettingsEnabled":agentSettings,
+        "AgentSelection":selection,
 	}))
 }

@@ -94,10 +94,38 @@
             </div>
             <button class="ui button" type="submit">{{tr "Save"}}</button>
         </form>
+        {{if .AgentSettingsEnabled}}
+        <div class="ui divider"></div>
+        <h3 class="ui header">Agent 安装设置</h3>
+        <form id="agentInstallSettingForm" class="ui form">
+            <div class="field"><label>Agent 二进制下载地址</label><input id="agentInstallURL" type="url" required maxlength="512" value="{{.AgentSelection.URL}}" placeholder="https://github.com/onecat/nezha-agent/releases/download/vX.Y.Z/nezha-agent"></div>
+            <p>仅接受独立仓库的明确版本、静态 Linux amd64 Agent。保存后用于新安装及手动确认升级，不会自动检查或升级。</p>
+            <p>当前版本：<span id="agentSelectedVersion">{{.AgentSelection.Version}}</span></p>
+            <p>SHA256：<code id="agentSelectedSHA256" style="overflow-wrap:anywhere">{{.AgentSelection.SHA256}}</code></p>
+            <button type="submit" id="agentInstallSave" class="ui button">验证并保存</button>
+            <p id="agentInstallResult" role="status" aria-live="polite"></p>
+        </form>
+        {{end}}
     </div>
 </div>
 {{template "common/footer" .}}
 <script>
+    {{if .AgentSettingsEnabled}}
+    document.getElementById("agentInstallSettingForm").addEventListener("submit",async function(event){
+        event.preventDefault();
+        const button=document.getElementById("agentInstallSave"), result=document.getElementById("agentInstallResult");
+        button.disabled=true;result.textContent="正在下载并验证 Agent，请勿重复提交。";
+        try{
+            const r=await fetch("/api/agent-install-setting",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:document.getElementById("agentInstallURL").value.trim()})});
+            const data=await r.json();if(!r.ok)throw Error(data.message||"保存失败");
+            document.getElementById("agentSelectedVersion").textContent=data.version;
+            document.getElementById("agentSelectedSHA256").textContent=data.sha256;
+            document.getElementById("agentInstallURL").value=data.url;
+            result.textContent="已验证并保存，立即生效。";
+        }catch(e){result.textContent=e.message||"保存失败，请重新打开设置核对。";}
+        finally{button.disabled=false;}
+    });
+    {{end}}
     $('#settingForm').submit(function () {
         $.post('/api/setting', $('#settingForm').serialize())
             .then((resp) => {

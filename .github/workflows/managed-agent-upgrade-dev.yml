@@ -1,13 +1,13 @@
-name: Dashboard v0.30.11 - configuration and security checks
+name: Dashboard v0.30.12 - configuration and security checks
 on:
   push:
-    branches: [static-agent-v0.30.11]
+    branches: [agent-settings-v0.30.12]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   package-verification:
-    if: github.ref_name == 'static-agent-v0.30.11'
+    if: github.ref_name == 'agent-settings-v0.30.12'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -23,7 +23,7 @@ jobs:
           go test -race -count=1 -v ./pkg/agentupgrade ./pkg/upgradewire ./cmd/agent-package
           go vet ./pkg/agentupgrade ./pkg/upgradewire ./cmd/agent-package
   dashboard-storage:
-    if: github.ref_name == 'static-agent-v0.30.11'
+    if: github.ref_name == 'agent-settings-v0.30.12'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -46,7 +46,7 @@ jobs:
           go build ./cmd/dashboard
 
   joint-upgrade:
-    if: github.ref_name == 'static-agent-v0.30.11'
+    if: github.ref_name == 'agent-settings-v0.30.12'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
@@ -75,7 +75,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y nginx apache2-utils
-      - name: Verify independent Agent release before embedding its digest
+      - name: Verify independent Agent regression fixture (not compiled into Dashboard)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -95,7 +95,7 @@ jobs:
           chmod 700 nezha-agent
           test "$(./nezha-agent --version)" = v0.30.04
           bash "$GITHUB_WORKSPACE/joint-agent/script/check-static-agent.sh" "$PWD/nezha-agent" v0.30.04
-          echo "AGENT_INSTALL_SHA256=$(cut -d' ' -f1 SHA256SUMS)" >> "$GITHUB_ENV"
+
           mkdir -p "$RUNNER_TEMP/joint-bin"
           curl -fsSL --proto '=https' --proto-redir '=https' --max-time 180 https://github.com/onecat/nezha-agent/releases/download/v0.30.03/nezha-agent -o "$RUNNER_TEMP/joint-bin/agent-v0.30.03-release"
           printf '%s  %s\n' 'bae8af9bf9ff07963e5dfa9c9cdf952678ac778591b312ce06822b85a37f9db7' "$RUNNER_TEMP/joint-bin/agent-v0.30.03-release" | sha256sum -c -
@@ -105,8 +105,8 @@ jobs:
         run: |
           set -eu
           mkdir -p "$RUNNER_TEMP/joint-bin"
-          go build -mod=readonly -trimpath -ldflags="-X github.com/naiba/nezha/service/singleton.Version=v0.30.11 -X github.com/naiba/nezha/cmd/dashboard/controller.agentInstallSHA256=$AGENT_INSTALL_SHA256" -o "$RUNNER_TEMP/joint-bin/dashboard" ./cmd/dashboard
-          test "$("$RUNNER_TEMP/joint-bin/dashboard" -v)" = v0.30.11
+          go build -mod=readonly -trimpath -ldflags="-X github.com/naiba/nezha/service/singleton.Version=v0.30.12" -o "$RUNNER_TEMP/joint-bin/dashboard" ./cmd/dashboard
+          test "$("$RUNNER_TEMP/joint-bin/dashboard" -v)" = v0.30.12
           go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/agent-package" ./cmd/agent-package
           cd joint-agent
           go build -mod=readonly -o "$RUNNER_TEMP/joint-bin/supervisor" ./cmd/supervisor
@@ -123,7 +123,7 @@ jobs:
           set -eu
           mkdir -p dist
           install -m 0755 "$RUNNER_TEMP/joint-bin/dashboard" dist/nezha-app
-          test "$(dist/nezha-app -v)" = v0.30.11
+          test "$(dist/nezha-app -v)" = v0.30.12
           (cd dist && sha256sum nezha-app > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
@@ -132,7 +132,7 @@ jobs:
           if-no-files-found: error
 
   security-regression:
-    if: github.ref_name == 'static-agent-v0.30.11'
+    if: github.ref_name == 'agent-settings-v0.30.12'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -170,7 +170,7 @@ jobs:
 
   release:
     if: >-
-      github.event_name == 'push' && github.ref == 'refs/heads/static-agent-v0.30.11' && github.event.head_commit.message == 'release: qualify and publish Dashboard v0.30.11'
+      github.event_name == 'push' && github.ref == 'refs/heads/agent-settings-v0.30.12' && github.event.head_commit.message == 'release: qualify and publish Dashboard v0.30.12'
     needs: [package-verification, dashboard-storage, joint-upgrade, security-regression]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -187,7 +187,7 @@ jobs:
       - name: Verify exact tested Dashboard binary
         run: |
           chmod +x release-dist/nezha-app
-          test "$(release-dist/nezha-app -v)" = v0.30.11
+          test "$(release-dist/nezha-app -v)" = v0.30.12
           (cd release-dist && sha256sum -c SHA256SUMS)
       - name: Confirm matching Agent release and publish Dashboard
         env:
@@ -204,8 +204,8 @@ jobs:
           done
           test "$agent_sha" = "b4a78fd5dc44e22b57aec5587ce53bbca96f0307"
           test "$agent_tag"  = v0.30.04
-          if gh release view v0.30.11 >/dev/null 2>&1; then
+          if gh release view v0.30.12 >/dev/null 2>&1; then
             echo "Release already exists; refusing to overwrite"
             exit 1
           fi
-          gh release create v0.30.11 release-dist/nezha-app release-dist/SHA256SUMS --target "$GITHUB_SHA" --title "Nezha v0.30.11" --notes-file RELEASE_V03011.md --latest
+          gh release create v0.30.12 release-dist/nezha-app release-dist/SHA256SUMS --target "$GITHUB_SHA" --title "Nezha v0.30.12" --notes-file RELEASE_V03012.md --latest

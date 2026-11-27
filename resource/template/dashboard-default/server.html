@@ -6,16 +6,13 @@
         <div class="ui grid">
             <div class="right floated right aligned twelve wide column">
                 {{if .ManagedUpgradeEnabled}}
-                <button type="button" class="ui right labeled nezha-primary-btn icon button" onclick="managedUpgrade()"><i class="arrow alternate circle up outline icon"></i> 升级 Agent</button>
+                <button type="button" class="ui right labeled nezha-primary-btn icon button" id="managedUpgradeButton" onclick="managedUpgrade()"><i class="arrow alternate circle up outline icon"></i> 升级 Agent</button>
                 {{else}}
                 <button type="button" class="ui disabled button" disabled title="升级 Agent：旧版 v0.20.5 需要手动迁移" aria-label="升级 Agent（尚未开放）">升级 Agent</button>
                 {{end}}
                 <button class="ui right labeled nezha-primary-btn icon button" onclick="batchEditServerGroup()"><i
                         class="edit icon"></i> {{tr "BatchEditServerGroup"}}
                 </button>
-                {{if .ManagedUpgradeVisible}}
-                <button type="button" class="ui button" onclick="managedUpgradeStatus()">升级状态</button>
-                {{end}}
                 <button class="ui right labeled nezha-primary-btn icon button" onclick="batchDeleteServer()"><i
                         class="trash icon"></i> {{tr "BatchDeleteServer"}}
                 </button>
@@ -24,6 +21,8 @@
                 </button>
             </div>
         </div>
+        {{if .AgentSelectionMissing}}<div class="ui message">请先在<a href="/setting">设置</a>中验证并保存 Agent 安装地址。</div>{{end}}
+        <div id="managedUpgradeProgress" class="ui message" role="status" aria-live="polite" hidden style="white-space:pre-wrap"></div>
         <table class="ui basic table">
             <thead>
                 <tr>
@@ -60,7 +59,7 @@
                     </td>
                     <td>
                         {{with index $.AgentInstallCommands $server.ID}}
-                        <button class="ui icon green mini button" data-agent-install-id="{{$server.ID}}" data-agent-installer-sha256="{{$.AgentInstallerDigest}}" data-clipboard-text="{{.}}" data-tooltip="复制 Linux amd64 一键安装 / 重装命令（root）"><i class="terminal icon"></i></button>
+                        <button class="ui icon green mini button" data-agent-install-id="{{$server.ID}}" data-agent-installer-sha256="{{$.AgentInstallerDigest}}" data-clipboard-text="{{.}}" data-tooltip="复制已设置版本安装命令（root；不同版本的已安装 Agent 请先升级）"><i class="terminal icon"></i></button>
                         {{else}}<button class="ui icon disabled mini button" disabled title="需要已验证 Agent Release、HTTPS 自动升级模式和 Agent 域名"><i class="terminal icon"></i></button>{{end}}
                     </td>
                     <td>
@@ -109,26 +108,36 @@
         const servers = Array.from(checkBoxList).filter(cb=>cb.checked).map(cb=>Number(cb.value));
         if (!servers.length || servers.length>3 || servers.some(id=>!Number.isSafeInteger(id)||id<1)) { alert('请选择 1–3 台服务器'); return; }
         {{if .URLUpgradeEnabled}}
-        const url=prompt('输入 Agent Linux amd64 二进制下载链接（自己的 onecat/nezha-agent Release）');
-        if(url===null||!url.trim())return;
-        if(!confirm('确认升级 '+servers.length+' 台已登记 Agent？'))return;
+        const progress=document.getElementById('managedUpgradeProgress'),button=document.getElementById('managedUpgradeButton');
+        const show=text=>{progress.hidden=false;progress.textContent=text;};
+        const post=(path,body)=>fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        const labels={pending:'等待升级',transferring:'传输中',verified:'校验通过',installing:'安装中',health_check:'健康检查',succeeded:'成功',rolling_back:'回滚中',rolled_back:'已回滚',failed:'失败'};
+        button.disabled=true;
         try{
-            const res=await fetch('/api/managed-upgrade/url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({servers,url:url.trim()})});
-            const data=await res.json();
-            const tasks=data.tasks||[];
-            if(!res.ok)alert(data.message||'升级任务创建失败');
-            if(tasks.length){
-                const pending=tasks.map(t=>t.Task.ID);
-                let statusText='';
-                for(let i=0;i<90;i++){
-                    const details=await Promise.all(pending.map(async id=>{const r=await fetch('/api/managed-upgrade/status/'+encodeURIComponent(id),{cache:'no-store'});if(!r.ok)throw Error('状态查询失败');return r.json();}));
-                    statusText=details.map(d=>d.Task.ServerID+': '+d.Task.State).join('\n');
-                    if(details.every(d=>['succeeded','rolled_back','failed'].includes(d.Task.State))){alert(statusText);return;}
-                    await new Promise(resolve=>setTimeout(resolve,3000));
-                }
-                alert('升级仍在处理中：'+statusText+'\n任务 ID：'+pending.join(', '));
+            const response=await post('/api/managed-upgrade/preview',{servers});
+            const preview=await response.json();
+            if(!response.ok)throw Error(preview.message||'预览失败');
+            const eligible=preview.targets.filter(t=>t.eligible);
+            const skipped=preview.targets.filter(t=>!t.eligible).map(t=>t.name+'：'+t.reason);
+            const summary='目标版本：'+preview.release.version+'\n'+eligible.map(t=>t.name+'：'+t.current+' → '+preview.release.version).join('\n')+(skipped.length?'\n跳过：\n'+skipped.join('\n'):'');
+            if(!eligible.length){show(summary+'\n没有符合条件的 Agent');return;}
+            if(!confirm(summary+'\n确认升级？'))return;
+            show('正在创建任务：'+preview.release.version);
+            const res=await post('/api/managed-upgrade/url',{servers:eligible.map(t=>t.id),revision:preview.release.revision});
+            const data=await res.json(), tasks=data.tasks||[];
+            if(!tasks.length){show(data.message||'没有创建任务');return;}
+            const pending=tasks.map(t=>t.Task.ID),names=new Map(eligible.map(t=>[t.id,t.name]));
+            let statusText='';
+            for(let i=0;i<90;i++){
+                const details=await Promise.all(pending.map(async id=>{const r=await fetch('/api/managed-upgrade/status/'+encodeURIComponent(id),{cache:'no-store'});if(!r.ok)throw Error('状态查询失败');return r.json();}));
+                statusText=details.map(d=>(names.get(d.Task.ServerID)||d.Task.ServerID)+'：'+(labels[d.Task.State]||d.Task.State)+(d.LateSuccessAt&&!d.ReviewedAt?'（超时回执，需管理员核查）':'')).join('\n');
+                show((res.ok?'':(data.message||'部分任务未创建')+'\n')+'目标版本：'+preview.release.version+'\n'+statusText+(skipped.length?'\n已跳过：\n'+skipped.join('\n'):''));
+                if(details.every(d=>['succeeded','rolled_back','failed'].includes(d.Task.State)))return;
+                await new Promise(resolve=>setTimeout(resolve,3000));
             }
-        }catch(e){alert('请求中断，请通过升级状态检查结果，不要重复提交');}
+            show('升级仍在处理中：\n'+statusText+'\n任务 ID：'+pending.join(', '));
+        }catch(e){show((e.message||'请求中断')+'。请核对服务器当前版本，不要重复提交已有任务。');}
+        finally{button.disabled=false;}
         return;
         {{else}}
         const digest=prompt('输入已导入升级包的 SHA256（留空选择上传文件）');
@@ -157,27 +166,6 @@
             alert((res.ok?'任务已创建':'部分或全部任务未创建')+'\n任务 ID：'+ids.join(', ')+'\n状态接口：/api/managed-upgrade/status/<任务ID>');
         }catch(e){alert('升级请求失败，请核对任务状态后再试');}
         {{end}}
-    }
-    {{end}}
-    {{if .ManagedUpgradeVisible}}
-    async function managedUpgradeStatus() {
-        const raw=prompt('请输入升级任务 ID');
-        if(raw===null)return;
-        const id=raw.trim();
-        if(!/^[a-zA-Z0-9_-]{1,128}$/.test(id)){alert('任务 ID 格式错误');return;}
-        try {
-            const r=await fetch('/api/managed-upgrade/status/'+encodeURIComponent(id),{cache:'no-store'});
-            if(!r.ok)throw Error('无法查询任务');
-            const data=await r.json(), t=data.Task;
-            const summary='任务：'+t.ID+'\n服务器：'+t.ServerID+'\n目标版本：'+t.Version+'\nSHA256：'+t.PackageSHA256+'\n状态：'+t.State;
-            if(!data.LateSuccessAt||data.ReviewedAt||t.State!=='installing'){
-                alert(summary+(data.ReviewedAt?'\n已人工确认：'+data.ReviewedAt:''));
-                return;
-            }
-            if(!confirm(summary+'\n收到超时的成功回执。只有在现场核对 Agent 持久化状态为 succeeded、已安装二进制及对应版本均正确后才可确认。确认不会再次安装，也不能用作灰度通过依据。是否继续？'))return;
-            const reply=await fetch('/api/managed-upgrade/reconcile/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision:data.Revision,digest:t.PackageSHA256,confirmed:true})});
-            alert(reply.ok?'已记录人工确认，Agent 可重试结果回执':'确认失败，请核查实际版本、任务和权限');
-        }catch(e){alert('状态查询或确认失败，请检查任务后重试');}
     }
     {{end}}
     function batchEditServerGroup() {

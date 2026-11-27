@@ -11,11 +11,11 @@ import(
  "path/filepath"
  "strings"
  "testing"
+ "github.com/naiba/nezha/service/upgradecontrol"
 )
 func TestAgentInstallerClipboardRoundTrip(t *testing.T){
- old:=agentInstallSHA256;defer func(){agentInstallSHA256=old}()
- agentInstallSHA256=""
- if agentInstallCommand("agent.example.test",443,"secret")!=""{t.Fatal("unverified release enabled")}
+ var selection upgradecontrol.ReleaseSelection
+ if agentInstallCommand(selection,"agent.example.test",443,"secret")!=""{t.Fatal("unverified release enabled")}
  // Harmless executable fixture, not a production installer.
  fixture:=`#!/bin/sh
 set -eu
@@ -23,11 +23,11 @@ set -eu
 IFS= read -r secret
 printf '%s\n%s\n' "$secret" "$4" > "$FIXTURE/result"
 `
- agentInstallSHA256=fmt.Sprintf("%x",sha256.Sum256([]byte(fixture)))
+ selection=upgradecontrol.ReleaseSelection{URL:"https://github.com/onecat/nezha-agent/releases/download/v0.99.01/nezha-agent",Version:"v0.99.01",SHA256:fmt.Sprintf("%x",sha256.Sum256([]byte(fixture))),Revision:1}
  secret:="a'b$z&<>"
- cmd:=agentInstallCommand("agent.example.test",443,secret)
- if !strings.Contains(cmd,agentInstallURL)||!strings.Contains(cmd,agentInstallSHA256)||strings.Contains(cmd,"agent-install.sh"){t.Fatal("invalid command")}
- if agentInstallCommand("",443,secret)!=""{t.Fatal("missing endpoint accepted")}
+ cmd:=agentInstallCommand(selection,"agent.example.test",443,secret)
+ if !strings.Contains(cmd,selection.URL)||!strings.Contains(cmd,selection.SHA256)||strings.Contains(cmd,"agent-install.sh"){t.Fatal("invalid command")}
+ if agentInstallCommand(selection,"",443,secret)!=""{t.Fatal("missing endpoint accepted")}
  tpl:=template.Must(template.New("copy").Parse(`<button data-clipboard-text="{{.}}">Install</button>`))
  var page bytes.Buffer
  if err:=tpl.Execute(&page,cmd);err!=nil{t.Fatal(err)}

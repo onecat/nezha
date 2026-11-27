@@ -2,9 +2,6 @@ package upgradecontrol
 
 import(
  "context"
- "crypto/sha256"
- "debug/elf"
- "debug/buildinfo"
  "encoding/hex"
  "errors"
  "io"
@@ -60,42 +57,31 @@ func checksum(data string,name string)(string,error){
  if found==""{return "",errors.New("binary checksum missing")}
  return found,nil
 }
-func(c *Control)UpgradeURL(ctx context.Context,operator uint64,servers []uint64,raw string)([]upgrade.Record,error){
- if !c.Automatic()||!c.Execution||!Operator(ctx,operator){return nil,errors.New("URL upgrade disabled")}
- version,err:=parseRelease(raw);if err!=nil{return nil,err}
- if len(servers)==0||len(servers)>upgrade.MaxActiveTasks{return nil,errors.New("select one to three enrolled Agents")}
- select{case c.automatic.gate<-struct{}{}:defer func(){<-c.automatic.gate}();default:return nil,errors.New("another URL upgrade is being prepared")}
+// UpgradeSelected authorizes only the exact release revision the operator
+// saw in the preview. The saved checksum remains the trust boundary even
+// if a remote release is replaced after the setting was saved.
+func(c *Control)UpgradeSelected(ctx context.Context,operator uint64,servers []uint64,revision uint64)([]upgrade.Record,error){
+ if !c.Automatic()||!c.Execution||!Operator(ctx,operator){return nil,errors.New("upgrade disabled")}
+ if revision==0||len(servers)==0||len(servers)>upgrade.MaxActiveTasks{return nil,errors.New("invalid confirmation")}
+ select{case c.automatic.gate<-struct{}{}:defer func(){<-c.automatic.gate}();default:return nil,errors.New("another release operation is running")}
+ selected,err:=c.Selection(ctx);if err!=nil||!selected.Valid()||selected.Revision!=revision{return nil,errors.New("Agent release selection changed; preview again")}
  seen:=map[uint64]bool{};high:=uint64(1)
  for _,id:=range servers{
   if seen[id]{return nil,errors.New("duplicate Agent")};seen[id]=true
-  p,h,err:=c.Policy(ctx,operator,id);if err!=nil||p.AgentArch!="amd64"{return nil,errors.New("Agent not enrolled or offline")}
+  p,h,err:=c.Policy(ctx,operator,id)
+  if err!=nil||p.AgentArch!="amd64"||!forwardEligible(selected.Version,p.AgentVersion,h){return nil,errors.New("target no longer eligible; preview again")}
   if h>high{high=h}
-  // Validate version before any external fetch; same or older versions fail.
-  m:=core.Manifest{FormatVersion:1,Component:"nezha-agent",Version:version,OS:"linux",Arch:"amd64",MinAgentVersion:"v0.30.00",ProtocolVersion:core.ProtocolVersion,Filename:"nezha-agent",Size:1,SHA256:strings.Repeat("0",64),SigningKeyID:"dashboard-local",ReleaseSequence:h+1}
-  if h==^uint64(0)||m.CheckUpgrade("linux","amd64",p.AgentVersion,h)!=nil{return nil,errors.New("target is not an eligible forward upgrade")}
  }
  if high==^uint64(0){return nil,errors.New("sequence exhausted")}
- client:=releaseClient();defer client.CloseIdleConnections()
- var sums strings.Builder
- if _,err:=fetch(ctx,client,releasePrefix+version+"/SHA256SUMS",64<<10,&sums);err!=nil{return nil,err}
- asset:=raw[strings.LastIndex(raw,"/")+1:]
- want,err:=checksum(sums.String(),asset);if err!=nil{return nil,err}
- binary,err:=os.CreateTemp(c.automatic.dir,".binary-");if err!=nil{return nil,err};defer os.Remove(binary.Name());defer binary.Close()
- digest:=sha256.New()
- size,err:=fetch(ctx,client,raw,core.MaxPackageSize-65536,io.MultiWriter(binary,digest));if err!=nil{return nil,err}
- if hex.EncodeToString(digest.Sum(nil))!=want{return nil,errors.New("release checksum mismatch")}
- ef,err:=elf.NewFile(binary);if err!=nil{return nil,errors.New("not an ELF binary")};defer ef.Close()
- if ef.Class!=elf.ELFCLASS64||ef.Machine!=elf.EM_X86_64||ef.Data!=elf.ELFDATA2LSB{return nil,errors.New("wrong executable architecture")}
- info,err:=buildinfo.Read(binary);if err!=nil||info.Path!="github.com/onecat/nezha-agent/cmd/agent"{return nil,errors.New("not the independent Agent binary")}
+ _,binary,size,err:=c.verifiedRelease(ctx,selected.URL,selected.SHA256);if err!=nil{return nil,err}
+ defer binary.Close();defer os.Remove(binary.Name())
  pack,err:=os.CreateTemp(c.automatic.dir,".package-");if err!=nil{return nil,err};defer os.Remove(pack.Name());defer pack.Close()
- manifest:=core.Manifest{Version:version,OS:"linux",Arch:"amd64",MinAgentVersion:"v0.30.00",SigningKeyID:"dashboard-local",ReleaseSequence:high+1}
+ manifest:=core.Manifest{Version:selected.Version,OS:"linux",Arch:"amd64",MinAgentVersion:"v0.30.00",SigningKeyID:"dashboard-local",ReleaseSequence:high+1}
  if _,err:=core.BuildPackage(pack,binary,size,manifest,c.automatic.key);err!=nil{return nil,err}
  if _,err:=pack.Seek(0,io.SeekStart);err!=nil{return nil,err}
  verified,err:=c.Scheduler.Import(ctx,pack);if err!=nil{return nil,err}
  if err:=c.Scheduler.ExpireUnstarted(ctx);err!=nil{return nil,err}
  var tasks []upgrade.Record
- // User explicitly approves this bounded batch; no manually copied canary ID.
- // Every target still passes the scheduler's independent authorization.
  for _,id:=range servers{
   r,err:=c.Scheduler.Admit(ctx,operator,id,verified.PackageSHA256);if err!=nil{return tasks,err}
   tasks=append(tasks,r)

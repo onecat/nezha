@@ -36,6 +36,9 @@ func (ma *memberAPI) serve() {
 	}))
 
 	mr.Use(requireSameOriginMutation)
+ mr.GET("/agent-install-setting",ma.agentInstallSetting)
+ mr.POST("/agent-install-setting",ma.agentInstallSetting)
+ mr.POST("/managed-upgrade/preview",ma.upgradePreview)
  mr.POST("/managed-upgrade/url",ma.upgradeURL)
  mr.POST("/managed-upgrade/package",ma.uploadUpgrade)
  mr.POST("/managed-upgrade/wave",ma.admitUpgradeWave)
