@@ -1,0 +1,82 @@
+name: Prepare clean source v0.30.12
+on:
+  push:
+    branches: [clean-source-v0.30.12]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d91cf225b6c35c97ed755ef405788139220ae36f
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Prepare the localized frontend used by release builds
+        run: python3 script/vendor-assets.py
+      - name: Package only build source and necessary assets
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "d91cf225b6c35c97ed755ef405788139220ae36f"
+          root="$RUNNER_TEMP/nezha-dashboard-v0.30.12"
+          mkdir -p "$root"
+          cp -a cmd model pkg proto resource service go.mod go.sum LICENSE LOCAL_AUTH.md RELEASE_V03012.md "$root/"
+          cp .frontend-packages.json "$root/frontend-packages.json"
+          test -d "$root/resource/static/vendor"
+          find "$root" -type f -name '*_test.go' -delete
+          cat > "$root/SOURCE.md" <<'EOF'
+          Source: onecat/nezha v0.30.12 (d91cf225b6c35c97ed755ef405788139220ae36f)
+          Includes localized frontend assets generated using the release build procedure. Their package inventory is frontend-packages.json.
+          Go 1.27.4, Linux amd64, GCC and CGO required for SQLite. No Node or Python required to compile this prepared source.
+          Build:
+            CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath -ldflags="-s -w -X github.com/naiba/nezha/service/singleton.Version=v0.30.12" -o nezha-app ./cmd/dashboard
+          The Go module download may require access to the configured Go proxy. Tests, deployment scripts, CI workflows and old release notes omitted. The localized resources are generated at packaging time from the tagged source, so this archive is not a byte-for-byte git archive. No production configuration or database included.
+          EOF
+          cd "$RUNNER_TEMP"
+          zip -q -r "nezha-dashboard-v0.30.12-source.zip" "nezha-dashboard-v0.30.12"
+          unzip -t "nezha-dashboard-v0.30.12-source.zip"
+          mkdir -p source-verify
+          unzip -q "nezha-dashboard-v0.30.12-source.zip" -d source-verify
+          cd "source-verify/nezha-dashboard-v0.30.12"
+          test ! -e .github
+          test ! -e script
+          test -z "$(find . -type f -name '*_test.go' -print -quit)"
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath -ldflags='-s -w -X github.com/naiba/nezha/service/singleton.Version=v0.30.12' -o "$RUNNER_TEMP/source-check" ./cmd/dashboard
+          test "$("$RUNNER_TEMP/source-check" -v)" = v0.30.12
+          echo 'Clean source archive compiled successfully'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nezha-dashboard-v0.30.12-source
+          path: ${{ runner.temp }}/nezha-dashboard-v0.30.12-source.zip
+          if-no-files-found: error
+          retention-days: 90
+  publish:
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nezha-dashboard-v0.30.12-source
+          path: dist
+      - name: Attach source ZIP without changing existing release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/onecat/nezha/git/ref/tags/v0.30.12 --jq '.object.sha')" = "d91cf225b6c35c97ed755ef405788139220ae36f"
+          test "$(gh release view v0.30.12 --json isDraft,isPrerelease --jq '.isDraft or .isPrerelease')" = false
+          test -s "dist/nezha-dashboard-v0.30.12-source.zip"
+          unzip -t "dist/nezha-dashboard-v0.30.12-source.zip"
+          gh release upload v0.30.12 "dist/nezha-dashboard-v0.30.12-source.zip"
