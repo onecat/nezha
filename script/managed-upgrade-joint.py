@@ -285,8 +285,21 @@ http {
                         wait("Installed service accepted reports",installed_report,90)
                         sudo("systemctl","is-enabled","--quiet","nezha-agent.service",check=True)
                         sudo("systemctl","is-active","--quiet","nezha-agent.service",check=True)
-                        if pathlib.Path("/opt/nezha/agent/nezha-agent").is_symlink():
+                        # The Agent directory is intentionally 0700 and owned
+                        # by its dedicated service user. Inspect it as root,
+                        # not the unprivileged CI runner.
+                        agent_path="/opt/nezha/agent/nezha-agent"
+                        if sudo("test","-L",agent_path).returncode==0:
                             raise RuntimeError("single binary must be the actual executable")
+                        sudo("test","-f",agent_path,check=True)
+                        sudo("test","-x",agent_path,check=True)
+                        if sudo("stat","-c","%a","/opt/nezha/agent",check=True,stdout=subprocess.PIPE,text=True).stdout.strip()!="700":
+                            raise RuntimeError("Agent installation directory is not private")
+                        if sudo("stat","-c","%U","/opt/nezha/agent",check=True,stdout=subprocess.PIPE,text=True).stdout.strip()!="nezha-agent":
+                            raise RuntimeError("Agent directory has unexpected owner")
+                        if sudo("test","-e","/opt/nezha/agent/nezha-supervisor").returncode==0:
+                            raise RuntimeError("separate Supervisor binary installed")
+                        print("Private single-binary installation layout passed",flush=True)
                         mainpid=sudo("systemctl","show","-p","MainPID","--value","nezha-agent.service",check=True,stdout=subprocess.PIPE,text=True).stdout.strip()
                         if sudo("readlink","/proc/"+mainpid+"/exe",check=True,stdout=subprocess.PIPE,text=True).stdout.strip()!="/opt/nezha/agent/nezha-agent":
                             raise RuntimeError("systemd is not directly running Agent")
@@ -296,7 +309,7 @@ http {
                             raise RuntimeError("installer enrollment identity mismatch")
                         saved_config_path="/opt/nezha/agent/agent.json"
                         saved_config=sudo("cat",saved_config_path,check=True,stdout=subprocess.PIPE).stdout
-                        saved_supervisor=sudo("cat","/opt/nezha/agent/.state/identity.json",check=True,stdout=subprocess.PIPE).stdout
+                        saved_identity=sudo("cat","/opt/nezha/agent/.state/identity.json",check=True,stdout=subprocess.PIPE).stdout
                         marker_paths=sudo("find","/opt/nezha","-maxdepth","3","-name","legacy-marker","-type","f",check=True,stdout=subprocess.PIPE,text=True).stdout.splitlines()
                         if len(marker_paths)!=1 or "/.agent-backup-" not in marker_paths[0] or sudo("cat",marker_paths[0],check=True,stdout=subprocess.PIPE).stdout!=b"legacy installation":
                             raise RuntimeError("legacy directory backup missing or changed")
@@ -304,7 +317,7 @@ http {
                         copied_install()
                         if sudo("cat",ledger_path,check=True,stdout=subprocess.PIPE).stdout!=ledger:
                             raise RuntimeError("reinstall changed durable ledger")
-                        if sudo("cat",saved_config_path,check=True,stdout=subprocess.PIPE).stdout!=saved_config or sudo("cat","/opt/nezha/agent/.state/identity.json",check=True,stdout=subprocess.PIPE).stdout!=saved_supervisor:
+                        if sudo("cat",saved_config_path,check=True,stdout=subprocess.PIPE).stdout!=saved_config or sudo("cat","/opt/nezha/agent/.state/identity.json",check=True,stdout=subprocess.PIPE).stdout!=saved_identity:
                             raise RuntimeError("reinstall changed Agent configuration or pinned identity")
                         def fresh_reinstall_report():
                             row=getjson("/api/v1/server/details?id="+str(install_sid))["result"][0]
